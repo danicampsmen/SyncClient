@@ -1124,8 +1124,8 @@ class SyncEngine {
         }
       }
     }
-
     // 3. PROPAGACIÓN DE ELIMINACIONES
+    // Filtrar claves registradas en el manifiesto dentro de esta subcarpeta
     const manifestKeys = Object.keys(pairManifest).filter(relPath => {
       const parentDir = path.dirname(relPath);
       return parentDir === (relativePrefix || '.');
@@ -1134,9 +1134,14 @@ class SyncEngine {
     for (const relPath of manifestKeys) {
       const fileName = path.basename(relPath);
       const manifestEntry = pairManifest[relPath];
-      const existsLocally = localEntries.some(e => e.name === fileName);
+      const fullLocalPath = path.join(localDir, fileName);
+
+      // CORRECCIÓN CLAVE: Verificar el estado físico real en disco en este instante
+      // (evita falsos borrados con listas obsoletas tomadas antes de la descarga)
+      const existsLocally = await fs.stat(fullLocalPath).then(() => true).catch(() => false);
       const existsRemotely = remoteFiles.some(f => f.name === fileName);
 
+      // Si existía en el manifiesto pero SE BORRÓ LOCALMENTE (ya no existe físicamente en disco) -> borrar en remoto
       if (!existsLocally && existsRemotely && (pair.direction === 'upload' || pair.direction === 'bidirectional')) {
         console.log(`[SyncEngine] Propagando eliminación local a Google Drive: ${fileName}`);
         try {
@@ -1154,10 +1159,10 @@ class SyncEngine {
         }
       }
 
+      // Si existía en el manifiesto pero SE BORRÓ REMOTAMENTE en Drive -> borrar en local
       if (existsLocally && !existsRemotely && (pair.direction === 'download' || pair.direction === 'bidirectional')) {
         console.log(`[SyncEngine] Propagando eliminación remota a disco local: ${fileName}`);
         try {
-          const fullLocalPath = path.join(localDir, fileName);
           await fs.rm(fullLocalPath, { force: true });
           delete pairManifest[relPath];
           this.addEvent({
@@ -1172,56 +1177,6 @@ class SyncEngine {
         }
       }
     }
-
-    this.manifests[pair.id] = pairManifest;
-  }
-
-  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename') {
-    const conflictIndex = this.pendingConflicts.findIndex(c => c.id === conflictId);
-    if (conflictIndex === -1) throw new Error('Conflict not found');
-
-    const conflict = this.pendingConflicts[conflictIndex];
-    const pair = this.pairs.find(p => p.id === conflict.pairId);
-    if (!pair) throw new Error('Associated pair not found');
-
-    console.log(`[SyncEngine] Resolviendo conflicto ${conflictId} con estrategia: ${resolution}`);
-
-    if (resolution === 'local') {
-      const parentDir = path.dirname(conflict.localPath);
-      const uploaded = await this.uploadDriveBinary(parentDir, conflict.localPath, path.basename(conflict.localPath), conflict.remoteFileId);
-      const stats = await fs.stat(conflict.localPath);
-      this.manifests[pair.id] = this.manifests[pair.id] || {};
-      this.manifests[pair.id][conflict.relativePath] = {
-        localMtime: stats.mtime.getTime(),
-        remoteMtime: new Date(uploaded.modifiedTime).getTime(),
-        remoteId: uploaded.id
-      };
-    } else if (resolution === 'remote') {
-      await this.downloadDriveBinary(conflict.remoteFileId, conflict.localPath, new Date(conflict.remoteMtime).toISOString());
-      const stats = await fs.stat(conflict.localPath);
-      this.manifests[pair.id] = this.manifests[pair.id] || {};
-      this.manifests[pair.id][conflict.relativePath] = {
-        localMtime: stats.mtime.getTime(),
-        remoteMtime: conflict.remoteMtime,
-        remoteId: conflict.remoteFileId
-      };
-    } else if (resolution === 'rename') {
-      const dirName = path.dirname(conflict.localPath);
-      const baseName = path.basename(conflict.localPath);
-      const remoteCopyPath = path.join(dirName, `(Remote) ${baseName}`);
-      await this.downloadDriveBinary(conflict.remoteFileId, remoteCopyPath, new Date(conflict.remoteMtime).toISOString());
-    }
-
-    this.pendingConflicts.splice(conflictIndex, 1);
-    await this.saveState();
-    this.triggerSync(pair.id);
-  }
-
-  private addEvent(ev: SyncEvent, skipSave = false) {
-    this.events.unshift(ev);
-    if (this.events.length > 200) this.events.pop();
-    if (!skipSave) this.saveState();
-  }
 
   // --- GOOGLE DRIVE API IMPLEMENTATION ---
 
