@@ -19,7 +19,6 @@ function matchesIgnorePattern(name: string, patterns?: string[]): boolean {
   return CoreSyncLogic.matchesIgnorePattern(name, patterns || CoreSyncLogic.DEFAULT_IGNORE_PATTERNS);
 }
 
-
 function formatBytes(bytes: number, decimals = 2) {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
@@ -55,6 +54,7 @@ class SyncEngine {
   private watchers: Record<string, FSWatcher> = {};
   private activeSyncs = new Set<string>();
   private pendingSyncs = new Set<string>();
+  private debounceTimers: Record<string, NodeJS.Timeout> = {};
   private intervalRefs: Record<string, NodeJS.Timeout> = {};
   private detectedExternalDrives: ExternalDriveAlert[] = [];
   private externalMonitorInterval: NodeJS.Timeout | null = null;
@@ -153,7 +153,6 @@ class SyncEngine {
     this.accessToken = token;
     if (token && prev !== token) {
       console.log('[SyncEngine] Google Drive Access Token updated in backend.');
-      // Restablecer estados que hayan quedado en 'unauthenticated'
       this.pairs.forEach(p => {
         if (p.status === 'unauthenticated') p.status = 'idle';
       });
@@ -202,7 +201,7 @@ class SyncEngine {
             }
           }
         } catch {
-          // El directorio /media o /run/media podría no existir
+          // El directorio no existe
         }
       }
     }, 5000);
@@ -236,7 +235,7 @@ class SyncEngine {
     }
     this.refreshWatchers();
     this.refreshIntervals();
-    this.saveState(); // No bloqueante
+    this.saveState();
   }
 
   public async forceSync(pairId: string) {
@@ -248,14 +247,15 @@ class SyncEngine {
     this.refreshWatchers();
     this.refreshIntervals();
     setTimeout(() => this.triggerSync(pair.id), 10);
-    this.saveState(); // No bloqueante
+    this.saveState();
   }
 
   public async cleanDuplicates(pairId: string): Promise<{ localDeleted: number; localRenamed: number; remoteDeleted: number; remoteRenamed: number }> {
     const pair = this.pairs.find(p => p.id === pairId);
     if (!pair) return { localDeleted: 0, localRenamed: 0, remoteDeleted: 0, remoteRenamed: 0 };
 
-    console.log(`[SyncEngine/Backend] Iniciando limpieza total en disco y Google Drive para: ${pair.localPath}`);    const localRes = await this.deduplicateLocalFolder(pair.localPath, pair.id, '');
+    console.log(`[SyncEngine/Backend] Iniciando limpieza total en disco y Google Drive para: ${pair.localPath}`);
+    const localRes = await this.deduplicateLocalFolder(pair.localPath, pair.id, '');
     let remoteRes = { deleted: 0, renamed: 0 };
 
     if (this.accessToken) {
@@ -295,7 +295,7 @@ class SyncEngine {
     }
     this.refreshWatchers();
     this.refreshIntervals();
-    this.saveState(); // No bloqueante
+    this.saveState();
   }
 
   public async removePair(pairId: string) {
@@ -423,8 +423,21 @@ class SyncEngine {
           });
 
           watcher.on('all', (event, filePath) => {
+            // CORRECCIÓN CRÍTICA: Si el motor está ejecutando una sincronización activa en este par,
+            // ignoramos las alertas del filesystem generadas por nuestras propias escrituras.
+            if (this.activeSyncs.has(pair.id)) {
+              return;
+            }
+
             console.log(`[SyncEngine/Chokidar] Evento '${event}' en: ${filePath}`);
-            this.triggerSync(pair.id);
+
+            // Debounce de 3 segundos para evitar ejecuciones múltiples continuas
+            if (this.debounceTimers[pair.id]) {
+              clearTimeout(this.debounceTimers[pair.id]);
+            }
+            this.debounceTimers[pair.id] = setTimeout(() => {
+              this.triggerSync(pair.id);
+            }, 3000);
           });
 
           this.watchers[pair.id] = watcher;
@@ -503,7 +516,6 @@ class SyncEngine {
       let remoteFolderId = 'root';
       let remotePathParts = pair.remotePath.replace(/^(RemoteServer|GoogleDrive|Drive):/, '').replace(/^[\/\\]+/, '').split('/').filter(Boolean);
 
-      // Estructuración automática bajo 'Ordenadores / Computers' si la categoría elegida es 'computers'
       if (pair.cloudCategory === 'computers' && remotePathParts[0] !== 'Ordenadores' && remotePathParts[0] !== 'Computers') {
         const deviceLabel = pair.deviceName || os.hostname() || 'Dispositivo-Linux';
         remotePathParts = ['Ordenadores', deviceLabel, ...remotePathParts];
@@ -540,10 +552,9 @@ class SyncEngine {
       pair.lastSynced = Date.now();
       pair.status = 'idle';
 
-      // Capturar resumen antes de sobreescribir el progreso
       const finalTotalFiles = pair.progress?.totalFiles ?? 0;
       const finalFilesProcessed = pair.progress?.currentFileIndex ?? 0;
-      const finalBytesTransferred = pair.progress?.bytesTransferred ?? 0;  // ← corregido: usar bytesTransferred real
+      const finalBytesTransferred = pair.progress?.bytesTransferred ?? 0;
       const finalTotalBytes = pair.progress?.totalBytes ?? 0;
 
       pair.progress = {
@@ -586,18 +597,15 @@ class SyncEngine {
       await this.saveState();
     } finally {
       this.activeSyncs.delete(pairId);
-      this.driveFolderCache.clear(); // Limpiar caché al terminar el ciclo de sincronización
+      this.driveFolderCache.clear();
+      // Solo disparar sincronización pendiente si proviene de cambios reales del usuario durante el proceso
       if (this.pendingSyncs.has(pairId)) {
         this.pendingSyncs.delete(pairId);
-        setTimeout(() => this.triggerSync(pairId), 1000);
+        setTimeout(() => this.triggerSync(pairId), 5000);
       }
     }
   }
 
-  /**
-   * Deduplica exportaciones automáticas (ej. de StarNote) que generan archivos como Nota(1).pdf, Nota(2).pdf.
-   * Conserva únicamente la última versión modificada/exportada y la renombra a su nombre base (Nota.pdf).
-   */
   private async deduplicateLocalFolder(localDir: string, pairId?: string, relativePrefix = ''): Promise<{ deleted: number; renamed: number }> {
     let deleted = 0;
     let renamed = 0;
@@ -623,7 +631,6 @@ class SyncEngine {
 
         const winner = versions[0];
         const losers = versions.slice(1);
-
 
         if (losers.length > 0) {
           console.log(`[Deduplicador/Backend] Grupo "${baseName}": Manteniendo última versión ${winner.name} (v${winner.version}), eliminando ${losers.length} copias obsoletas.`);
@@ -782,9 +789,6 @@ class SyncEngine {
   }
 
   private async syncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = '') {
-    // 0. PASO PREVIO: Deduplicar ANTES de listar y sincronizar.
-    // Limpia copias intermedias y conserva únicamente la última versión renombrándola al nombre base.
-    // De esta forma evitamos subir y bajar por la red todas las ediciones parciales intermedias.
     await Promise.all([
       this.deduplicateLocalFolder(localDir, pair.id, relativePrefix),
       this.deduplicateDriveFolder(remoteFolderId, pair.id, relativePrefix)
@@ -807,7 +811,7 @@ class SyncEngine {
       }
     };
 
-    // 1. PROCESAR SUBIDAS / CONFLICTOS / MODIFICACIONES LOCALES (Paralelizado por lotes de 3)
+    // 1. PROCESAR SUBIDAS / CONFLICTOS / MODIFICACIONES LOCALES
     if (pair.direction === 'upload' || pair.direction === 'bidirectional') {
       const dirEntries = localEntries.filter(e => e.isDirectory() && !matchesIgnorePattern(e.name, this.settings.ignoredPatterns));
       const fileEntries = localEntries.filter(e => !e.isDirectory() && !matchesIgnorePattern(e.name, this.settings.ignoredPatterns) && !e.name.endsWith('.gdoc') && !e.name.endsWith('.gsheet') && !e.name.endsWith('.gslides') && !e.name.endsWith('.vstream'));
@@ -835,8 +839,6 @@ class SyncEngine {
         let stats: any = null;
         try { stats = await fs.stat(fullLocalPath); } catch { return; }
 
-        // --- Detectar si es un archivo numerado (rotman(8).pdf) ---
-        // Si lo es, lo subimos como actualización del nombre base (rotman.pdf)
         const numberedMatch = entry.name.match(/^(.+?)(?:\s*\(\s*(\d+)\s*\))+\.([a-zA-Z0-9]+)$/);
         const effectiveName = numberedMatch ? `${numberedMatch[1].trim()}.${numberedMatch[3]}` : entry.name;
         const isNumbered = !!numberedMatch;
@@ -848,7 +850,6 @@ class SyncEngine {
         const localMtime = stats.mtime.getTime();
         const remoteMtime = remoteFile ? new Date(remoteFile.modifiedTime).getTime() : 0;
 
-        // Conflicto bilateral: solo aplica a archivos no numerados
         if (!isNumbered && manifestEntry && remoteFile &&
           localMtime > manifestEntry.localMtime + 5000 &&
           remoteMtime > manifestEntry.remoteMtime + 5000 &&
@@ -883,15 +884,13 @@ class SyncEngine {
         const isSizeIdentical = remoteFile && (stats.size === remoteSize || remoteFile.mimeType.startsWith('application/vnd.google-apps.'));
 
         if (isNumbered) {
-          // Un archivo numerado SIEMPRE es una exportación más nueva → subir directamente
           shouldUpload = true;
         } else if (!remoteFile) {
           shouldUpload = true;
-        } else if (manifestEntry && Math.abs(localMtime - manifestEntry.localMtime) > 2000) {
+        } else if (manifestEntry && Math.abs(localMtime - manifestEntry.localMtime) > 3000) {
           shouldUpload = true;
         } else if (!manifestEntry) {
           if (isSizeIdentical) {
-            // Reenlace inteligente: el archivo ya existe en Drive con idéntico tamaño. No re-subir.
             pairManifest[relPath] = {
               localMtime,
               remoteMtime,
@@ -923,7 +922,6 @@ class SyncEngine {
           if (!isNumbered && remoteFile && this.settings.conflictResolution === 'rename') {
             uploadedFile = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, `(Local) ${effectiveName}`);
           } else {
-            // Subir con el nombre efectivo (base), reemplazando el archivo anterior en Drive si existe
             uploadedFile = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, effectiveName, remoteFile?.id);
           }
           if (pair.progress) {
@@ -931,8 +929,11 @@ class SyncEngine {
             pair.progress.percentage = pair.progress.totalBytes > 0 ? Math.min(100, Math.round((pair.progress.bytesTransferred / pair.progress.totalBytes) * 100)) : 100;
           }
 
+          // Leer stats locales frescos tras subida
+          const freshLocalStats = await fs.stat(fullLocalPath).catch(() => stats);
+
           pairManifest[relPath] = {
-            localMtime,
+            localMtime: freshLocalStats.mtime.getTime(),
             remoteMtime: new Date(uploadedFile.modifiedTime).getTime(),
             remoteId: uploadedFile.id
           };
@@ -950,7 +951,7 @@ class SyncEngine {
           }, true);
         }
       });
-      await this.runInPool(uploadTasks, 2); // Concurrencia controlada para estabilidad de CPU/Ancho de banda
+      await this.runInPool(uploadTasks, 2);
     }
 
     // 2. PROCESAR DESCARGAS / MODIFICACIONES REMOTAS
@@ -970,7 +971,6 @@ class SyncEngine {
             await this.syncDirectoryTree(fullLocalPath, remoteFile.id, pair, relPath);
           }
         } else {
-          // Conversión inteligente para archivos de Google Docs/Sheets/Slides a hipervínculos
           if (remoteFile.mimeType.startsWith('application/vnd.google-apps.')) {
             let ext = '.gdoc';
             if (remoteFile.mimeType.includes('spreadsheet')) ext = '.gsheet';
@@ -1005,7 +1005,6 @@ class SyncEngine {
             continue;
           }
 
-          // Si el archivo está en lista de conflictos pendientes, ignorarlo
           if (this.pendingConflicts.some(c => c.pairId === pair.id && c.relativePath === relPath)) {
             continue;
           }
@@ -1022,11 +1021,10 @@ class SyncEngine {
             const remoteSize = parseInt((remoteFile as any).size || '0', 10);
             const isSizeIdentical = localStats.size === remoteSize || remoteFile.mimeType.startsWith('application/vnd.google-apps.');
 
-            if (manifestEntry && Math.abs(remoteTime - manifestEntry.remoteMtime) > 2000) {
+            if (manifestEntry && Math.abs(remoteTime - manifestEntry.remoteMtime) > 3000) {
               shouldDownload = true;
             } else if (!manifestEntry) {
               if (isSizeIdentical) {
-                // Reenlace inteligente: el archivo ya existe localmente con idéntico tamaño. No descargar.
                 pairManifest[relPath] = {
                   localMtime: localTime,
                   remoteMtime: remoteTime,
@@ -1042,7 +1040,6 @@ class SyncEngine {
           if (shouldDownload) {
             const isExistingPhysical = localEntries.some(e => e.name === remoteFile.name);
             if (pair.syncMode === 'streaming' && !isExistingPhysical) {
-              // Modo Streaming Virtual: generar o actualizar Stub (.vstream) en lugar de descargar GBs de datos
               const stubPath = path.join(localDir, `${remoteFile.name}.vstream`);
               const stubContent = JSON.stringify({
                 id: remoteFile.id,
@@ -1057,8 +1054,10 @@ class SyncEngine {
               await fs.mkdir(localDir, { recursive: true });
               await fs.writeFile(stubPath, stubContent, 'utf8');
 
+              const stubStats = await fs.stat(stubPath);
+
               pairManifest[relPath] = {
-                localMtime: Date.now(),
+                localMtime: stubStats.mtime.getTime(),
                 remoteMtime: new Date(remoteFile.modifiedTime).getTime(),
                 remoteId: remoteFile.id
               };
@@ -1090,14 +1089,16 @@ class SyncEngine {
               const possibleStub = path.join(localDir, `${remoteFile.name}.vstream`);
               await fs.unlink(possibleStub).catch(() => null);
 
-              if (localEntry && this.settings.conflictResolution === 'rename') {
-                await this.downloadDriveBinary(remoteFile.id, path.join(localDir, `(Remote) ${remoteFile.name}`), remoteFile.modifiedTime);
-              } else {
-                await this.downloadDriveBinary(remoteFile.id, fullLocalPath, remoteFile.modifiedTime);
-              }
+              const targetDownloadPath = (localEntry && this.settings.conflictResolution === 'rename')
+                ? path.join(localDir, `(Remote) ${remoteFile.name}`)
+                : fullLocalPath;
 
-              const updatedLocalStats = await fs.stat(fullLocalPath);
+              await this.downloadDriveBinary(remoteFile.id, targetDownloadPath, remoteFile.modifiedTime);
+
+              // Leer mtime real producido tras utimes
+              const updatedLocalStats = await fs.stat(targetDownloadPath);
               const realSize = updatedLocalStats.size || fileSize;
+
               if (pair.progress) {
                 pair.progress.bytesTransferred = (pair.progress.bytesTransferred || 0) + realSize;
                 pair.progress.percentage = pair.progress.totalBytes > 0 ? Math.min(100, Math.round((pair.progress.bytesTransferred / pair.progress.totalBytes) * 100)) : 100;
@@ -1125,7 +1126,6 @@ class SyncEngine {
     }
 
     // 3. PROPAGACIÓN DE ELIMINACIONES
-    // Buscar entradas registradas en el manifiesto dentro de esta subcarpeta que hayan sido eliminadas
     const manifestKeys = Object.keys(pairManifest).filter(relPath => {
       const parentDir = path.dirname(relPath);
       return parentDir === (relativePrefix || '.');
@@ -1137,7 +1137,6 @@ class SyncEngine {
       const existsLocally = localEntries.some(e => e.name === fileName);
       const existsRemotely = remoteFiles.some(f => f.name === fileName);
 
-      // Si existía en el manifiesto pero se borró localmente -> borrar en remoto (Upload / Bidireccional)
       if (!existsLocally && existsRemotely && (pair.direction === 'upload' || pair.direction === 'bidirectional')) {
         console.log(`[SyncEngine] Propagando eliminación local a Google Drive: ${fileName}`);
         try {
@@ -1155,7 +1154,6 @@ class SyncEngine {
         }
       }
 
-      // Si existía en el manifiesto pero se borró remotamente -> borrar en local (Download / Bidireccional)
       if (existsLocally && !existsRemotely && (pair.direction === 'download' || pair.direction === 'bidirectional')) {
         console.log(`[SyncEngine] Propagando eliminación remota a disco local: ${fileName}`);
         try {
@@ -1189,17 +1187,16 @@ class SyncEngine {
     console.log(`[SyncEngine] Resolviendo conflicto ${conflictId} con estrategia: ${resolution}`);
 
     if (resolution === 'local') {
-      // Forzar subida de copia local sobre remoto
       const parentDir = path.dirname(conflict.localPath);
       const uploaded = await this.uploadDriveBinary(parentDir, conflict.localPath, path.basename(conflict.localPath), conflict.remoteFileId);
+      const stats = await fs.stat(conflict.localPath);
       this.manifests[pair.id] = this.manifests[pair.id] || {};
       this.manifests[pair.id][conflict.relativePath] = {
-        localMtime: conflict.localMtime,
+        localMtime: stats.mtime.getTime(),
         remoteMtime: new Date(uploaded.modifiedTime).getTime(),
         remoteId: uploaded.id
       };
     } else if (resolution === 'remote') {
-      // Forzar descarga de copia remota sobre local
       await this.downloadDriveBinary(conflict.remoteFileId, conflict.localPath, new Date(conflict.remoteMtime).toISOString());
       const stats = await fs.stat(conflict.localPath);
       this.manifests[pair.id] = this.manifests[pair.id] || {};
@@ -1209,14 +1206,12 @@ class SyncEngine {
         remoteId: conflict.remoteFileId
       };
     } else if (resolution === 'rename') {
-      // Descargar copia remota con sufijo (Remote)
       const dirName = path.dirname(conflict.localPath);
       const baseName = path.basename(conflict.localPath);
       const remoteCopyPath = path.join(dirName, `(Remote) ${baseName}`);
       await this.downloadDriveBinary(conflict.remoteFileId, remoteCopyPath, new Date(conflict.remoteMtime).toISOString());
     }
 
-    // Quitar de lista de conflictos pendientes
     this.pendingConflicts.splice(conflictIndex, 1);
     await this.saveState();
     this.triggerSync(pair.id);
@@ -1347,7 +1342,6 @@ class SyncEngine {
 
     const metadata = existingFileId ? { name } : { name, parents: [parentId] };
 
-    // 1. Resumable Upload (óptimo para transferencias de mayor velocidad y estabilidad)
     try {
       const initUrl = existingFileId
         ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&fields=id,name,mimeType,modifiedTime,webViewLink`
@@ -1363,7 +1357,6 @@ class SyncEngine {
         },
         body: JSON.stringify(metadata)
       });
-
 
       if (initRes.ok) {
         const sessionUri = initRes.headers.get('Location');
@@ -1383,7 +1376,6 @@ class SyncEngine {
       console.warn('[SyncEngine/Backend] Fallback a subida multipart tras reintentar resumable:', e.message);
     }
 
-    // Fallback a subida multipart
     const boundary = '-------SyncClientBoundary' + Math.random().toString(36);
     const header = Buffer.from(
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
