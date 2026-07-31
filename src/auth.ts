@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import firebaseConfig from '../firebase-applet-config.json';
+import { backendFetch, ensureBackendSession } from './services/backendSession';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -227,8 +228,15 @@ export const ensureValidToken = async (): Promise<string | null> => {
 const buildMobileOAuthUrl = async (): Promise<string> => {
   const verifier = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
-  const state = verifier.substring(0, 16);
+  const state = base64URLEncode(crypto.getRandomValues(new Uint8Array(24)));
   savePKCEState(state, verifier);
+  await ensureBackendSession();
+  const prepared = await backendFetch('/api/oauth/prepare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state })
+  });
+  if (!prepared.ok) throw new Error('No se pudo preparar la sesión OAuth');
 
   const redirectUri = 'http://localhost:3000/api/oauth/callback';
   const scope = encodeURIComponent('https://www.googleapis.com/auth/drive profile email');
@@ -253,16 +261,13 @@ const pollBackendForToken = (): Promise<string | null> =>
     const maxAttempts = 120; // 1 minuto
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:3000/api/oauth/token');
+        const res = await backendFetch('/api/oauth/token');
         if (!res.ok) {
           console.warn(`[Auth/Mobile] Servidor respondió con: ${res.status}`);
           return;
         }
         const data = await res.json();
-        if (data.token) {
-          clearInterval(interval);
-          resolve(data.token);
-        } else if (data.code && data.state) {
+        if (data.code && data.state) {
           clearInterval(interval);
           const verifier = getPKCEVerifier(data.state);
           if (verifier) {
@@ -337,11 +342,15 @@ export const initAuth = (
       } else {
         console.log('[Auth] Token existe pero Firebase no tiene usuario. Intentando restaurar sesión...');
         try {
-          const credential = GoogleAuthProvider.credential(null, storedToken);
+          const validToken = await ensureValidToken();
+          if (!validToken) {
+            throw new Error('No se pudo renovar el token de acceso');
+          }
+          const credential = GoogleAuthProvider.credential(null, validToken);
           const result = await signInWithCredential(auth, credential);
           console.log('[Auth] ✅ Sesión restaurada con token almacenado.');
-          cachedAccessToken = storedToken;
-          if (onAuthSuccess) onAuthSuccess(result.user, storedToken);
+          cachedAccessToken = validToken;
+          if (onAuthSuccess) onAuthSuccess(result.user, validToken);
         } catch (err: any) {
           console.warn('[Auth] No se pudo restaurar sesión con token almacenado:', err?.message || err);
           clearTokens();
@@ -426,15 +435,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
             } else {
               resolve(null);
             }
-          }
-        } else if (url.includes('access_token=') || url.includes('token=')) {
-          const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1] || '');
-          const t = params.get('access_token') || params.get('token');
-          if (t) {
-            resolved = true;
-            handlePromise.then(h => h.remove());
-            Browser.close().catch(() => { });
-            resolve(t);
           }
         }
       });

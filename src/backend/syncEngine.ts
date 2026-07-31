@@ -1,10 +1,14 @@
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import { Dirent } from 'fs';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'crypto';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import chokidar, { FSWatcher } from 'chokidar';
 import { SyncPair, SyncEvent, SyncSettings, PendingConflict, ExternalDriveAlert } from '../types';
-import { CoreSyncLogic, RemoteEntry, SyncPlan } from '../shared/CoreSyncLogic';
+import { CoreSyncLogic, RemoteEntry, SyncPlan, SyncStateSnapshot } from '../shared/CoreSyncLogic';
 import { USE_V2_SYNC, FileState, SyncJournalEntry } from '../shared/schema';
 import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
@@ -79,6 +83,10 @@ class SyncEngine {
   private readonly SYNC_COOLDOWN_MS = 60000;
   private readonly MAX_POLL_INTERVAL_MS = 900000;
   private readonly INITIAL_POLL_MS = 30000;
+  private readonly DRIVE_MAX_ATTEMPTS = 3;
+  private readonly DRIVE_MIN_REQUEST_INTERVAL_MS = 200;
+  private driveRequestTail: Promise<void> = Promise.resolve();
+  private nextDriveRequestAt = 0;
 
   private async runInPool<T>(tasks: (() => Promise<T>)[], concurrency = 3): Promise<T[]> {
     const results: T[] = new Array(tasks.length);
@@ -95,6 +103,51 @@ class SyncEngine {
     });
     await Promise.all(workers);
     return results;
+  }
+
+  private async waitForDriveSlot(): Promise<void> {
+    let release!: () => void;
+    const previous = this.driveRequestTail;
+    this.driveRequestTail = new Promise<void>(resolve => { release = resolve; });
+    await previous;
+    try {
+      const delay = Math.max(0, this.nextDriveRequestAt - Date.now());
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+      this.nextDriveRequestAt = Date.now() + this.DRIVE_MIN_REQUEST_INTERVAL_MS;
+    } finally {
+      release();
+    }
+  }
+
+  private isTransientDriveStatus(status: number): boolean {
+    return status === 429 || status >= 500;
+  }
+
+  private async driveRequest(
+    url: string,
+    init: RequestInit & { duplex?: 'half' },
+    maxAttempts = this.DRIVE_MAX_ATTEMPTS
+  ): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        const delay = Math.min(32000, 1000 * (2 ** (attempt - 2)));
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      try {
+        await this.waitForDriveSlot();
+        const response = await fetch(url, init);
+        if (!this.isTransientDriveStatus(response.status) || attempt === maxAttempts) {
+          return response;
+        }
+        await response.body?.cancel().catch(() => { });
+        lastError = new Error(`Drive API transient error (${response.status})`);
+      } catch (error) {
+        lastError = error;
+        if (attempt === maxAttempts) throw error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Drive API request failed');
   }
 
   constructor() {
@@ -479,6 +532,8 @@ class SyncEngine {
                 isStub: true
               }, null, 2);
               await fs.writeFile(stubPath, stubContent, 'utf8');
+              this.markSelfWritten(stubPath);
+              this.markSelfWritten(fullPath);
               await fs.unlink(fullPath).catch(() => null);
               console.log(`[SyncEngine] Deshidratado exitosamente a stub ligero: ${entry.name}`);
             }
@@ -515,6 +570,7 @@ class SyncEngine {
                 const targetRealPath = path.join(dir, realFileName);
                 console.log(`[SyncEngine] Hidratando archivo binario desde Google Drive: ${realFileName}`);
                 await this.downloadDriveBinary(stub.id, targetRealPath, stub.modifiedTime || new Date().toISOString());
+                this.markSelfWritten(fullPath);
                 await fs.unlink(fullPath).catch(() => null);
               }
             } catch (err) {
@@ -838,13 +894,14 @@ class SyncEngine {
 
     // FASE 3: Computar plan con three-way merge
     // Convertir dbState (Map<string, FileState>) al formato esperado por computeSyncPlan
-    const dbStateForPlan = new Map<string, { localMtime: number; remoteMtime: number; remoteId: string; fileSize: number }>();
+    const dbStateForPlan = new Map<string, SyncStateSnapshot>();
     for (const [relPath, state] of dbState) {
       dbStateForPlan.set(relPath, {
         localMtime: state.local_mtime || 0,
         remoteMtime: state.remote_mtime || 0,
         remoteId: state.remote_id || '',
-        fileSize: state.file_size || 0
+        fileSize: state.file_size,
+        vectorClock: state.vector_clock
       });
     }
     const plan = CoreSyncLogic.computeSyncPlan(localSnapshot, remoteSnapshot, dbStateForPlan, this.DEVICE_ID);
@@ -873,7 +930,7 @@ class SyncEngine {
             action: 'subiendo'
           };
         }
-        await this.uploadDriveBinary(remoteFolderId, fullLocalPath, upload.remoteName, upload.remoteId);
+        await this.uploadDriveBinary(remoteFolderId, fullLocalPath, upload.remoteName, upload.remoteId, upload.vectorClock);
         this.db.journalDone(journalId);
         if (pair.progress) {
           pair.progress.bytesTransferred = (pair.progress.bytesTransferred || 0) + fileSize;
@@ -920,7 +977,13 @@ class SyncEngine {
             action: 'descargando'
           };
         }
-        await this.downloadDriveBinary(download.remoteFile.id, fullLocalPath, download.remoteFile.modifiedTime);
+        await this.downloadDriveBinary(
+          download.remoteFile.id,
+          fullLocalPath,
+          download.remoteFile.modifiedTime,
+          download.remoteFile.md5Checksum,
+          download.remoteFile.size ? parseInt(download.remoteFile.size, 10) : undefined
+        );
         this.markSelfWritten(fullLocalPath);
         this.db.journalDone(journalId);
         if (pair.progress) {
@@ -947,6 +1010,7 @@ class SyncEngine {
       const fullLocalPath = path.join(localDir, del.localPath);
       const journalId = this.db.journalStart(pair.id, 'delete_local_start', del.localPath);
       try {
+        this.markSelfWritten(fullLocalPath);
         await fs.rm(fullLocalPath, { force: true }).catch(() => { });
         this.db.journalDone(journalId);
         this.addEvent({
@@ -978,6 +1042,15 @@ class SyncEngine {
         }, true);
       } catch (e: any) {
         this.db.journalFail(journalId);
+        console.error(`[v2Sync] Remote delete failed: ${del.remoteId}`, e.message || e);
+        this.addEvent({
+          id: Math.random().toString(36).substr(2, 9),
+          pairId: pair.id,
+          filename: del.remoteId,
+          action: 'info',
+          timestamp: Date.now(),
+          details: `No se pudo eliminar en Drive: ${e.message || e}`
+        }, true);
       }
     }
 
@@ -1077,7 +1150,7 @@ class SyncEngine {
           headers['If-Modified-Since'] = modifiedSince;
         }
 
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${state.remote_id}?fields=modifiedTime,md5Checksum,size`, {
+        const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files/${state.remote_id}?fields=modifiedTime,md5Checksum,size`, {
           method: 'GET',
           headers
         });
@@ -1093,9 +1166,8 @@ class SyncEngine {
           continue;
         }
 
-        if (res.status === 401) {
-          throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
-        }
+        if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
+        await this.handleDriveResponse(res);
 
         // HTTP 200 — archivo cambió remotamente
         if (res.ok) {
@@ -1159,6 +1231,7 @@ class SyncEngine {
           console.log(`[Deduplicador/Backend] Grupo "${baseName}": Manteniendo última versión ${winner.name} (v${winner.version}), eliminando ${losers.length} copias obsoletas.`);
           for (const loser of losers) {
             const filePath = path.join(localDir, loser.name);
+            this.markSelfWritten(filePath);
             await fs.unlink(filePath).catch(() => { });
             deleted++;
             if (manifest) {
@@ -1173,6 +1246,8 @@ class SyncEngine {
           const oldPath = path.join(localDir, winner.name);
           const newPath = path.join(localDir, baseName);
           console.log(`[Deduplicador/Backend] Renombrando última exportación al nombre base: ${winner.name} -> ${baseName}`);
+          this.markSelfWritten(oldPath);
+          this.markSelfWritten(newPath);
           await fs.rename(oldPath, newPath).catch(err => console.error(`Error renombrando ${oldPath}:`, err));
           renamed++;
           if (manifest) {
@@ -1296,9 +1371,9 @@ class SyncEngine {
 
   private async renameDriveFile(fileId: string, newName: string, parentId: string): Promise<void> {
     this.driveFolderCache.delete(parentId);
-    if (!this.accessToken) return;
+    if (!this.accessToken) throw new Error('No OAuth access token set');
     try {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${this.accessToken}`,
@@ -1306,6 +1381,7 @@ class SyncEngine {
         },
         body: JSON.stringify({ name: newName })
       });
+      await this.handleDriveResponse(res);
     } catch (err) {
       console.error(`[Drive/Backend] Error renombrando archivo ID ${fileId}:`, err);
     }
@@ -1513,6 +1589,7 @@ class SyncEngine {
                 console.log(`[SyncEngine/GoogleDocs] Generando archivo directo: ${docFileName}`);
                 await fs.mkdir(localDir, { recursive: true });
                 await fs.writeFile(docPath, shortcutContent, 'utf8');
+                this.markSelfWritten(docPath);
                 this.addEvent({
                   id: Math.random().toString(36).substr(2, 9),
                   pairId: pair.id,
@@ -1576,6 +1653,7 @@ class SyncEngine {
               console.log(`[SyncEngine/Streaming] Creando stub virtual bajo demanda: ${stubPath}`);
               await fs.mkdir(localDir, { recursive: true });
               await fs.writeFile(stubPath, stubContent, 'utf8');
+              this.markSelfWritten(stubPath);
 
               const stubStats = await fs.stat(stubPath);
 
@@ -1610,13 +1688,20 @@ class SyncEngine {
               await delayForBandwidth(fileSize || 1024 * 500, this.settings.maxDownloadSpeed);
 
               const possibleStub = path.join(localDir, `${remoteFile.name}.vstream`);
+              this.markSelfWritten(possibleStub);
               await fs.unlink(possibleStub).catch(() => null);
 
               const targetDownloadPath = (localEntry && this.settings.conflictResolution === 'rename')
                 ? path.join(localDir, `(Remote) ${remoteFile.name}`)
                 : fullLocalPath;
 
-              await this.downloadDriveBinary(remoteFile.id, targetDownloadPath, remoteFile.modifiedTime);
+              await this.downloadDriveBinary(
+                remoteFile.id,
+                targetDownloadPath,
+                remoteFile.modifiedTime,
+                remoteFile.md5Checksum,
+                remoteFile.size ? parseInt(remoteFile.size, 10) : undefined
+              );
 
               // Leer mtime real producido tras utimes
               const updatedLocalStats = await fs.stat(targetDownloadPath);
@@ -1686,6 +1771,7 @@ class SyncEngine {
       if (existsLocally && !existsRemotely && (pair.direction === 'download' || pair.direction === 'bidirectional')) {
         console.log(`[SyncEngine] Propagando eliminación remota a disco local: ${fileName}`);
         try {
+          this.markSelfWritten(fullLocalPath);
           await fs.rm(fullLocalPath, { force: true });
           delete pairManifest[relPath];
           this.addEvent({
@@ -1748,7 +1834,7 @@ class SyncEngine {
       url.searchParams.append('pageSize', '1000');
       if (pageToken) url.searchParams.append('pageToken', pageToken);
 
-      const res = await fetch(url.toString(), {
+      const res = await this.driveRequest(url.toString(), {
         headers: { Authorization: `Bearer ${this.accessToken}` }
       });
       await this.handleDriveResponse(res);
@@ -1770,7 +1856,7 @@ class SyncEngine {
       parents: [parentId]
     };
 
-    const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime,webViewLink', {
+    const res = await this.driveRequest('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime,webViewLink', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -1784,9 +1870,9 @@ class SyncEngine {
 
   private async deleteDriveFile(fileId: string, parentId?: string): Promise<void> {
     if (parentId) this.driveFolderCache.delete(parentId);
-    if (!this.accessToken) return;
+    if (!this.accessToken) throw new Error('No OAuth access token set');
     try {
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${this.accessToken}` }
       });
@@ -1796,33 +1882,84 @@ class SyncEngine {
     }
   }
 
-  private async downloadDriveBinary(fileId: string, destPath: string, modifiedTime: string): Promise<void> {
+  private async downloadDriveBinary(
+    fileId: string,
+    destPath: string,
+    modifiedTime: string,
+    expectedMd5?: string,
+    expectedSize?: number
+  ): Promise<void> {
     if (!this.accessToken) throw new Error('No OAuth access token set');
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: { Authorization: `Bearer ${this.accessToken}` }
-    });
-    await this.handleDriveResponse(res);
-    const arrayBuf = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
-
     await fs.mkdir(path.dirname(destPath), { recursive: true });
-    await fs.writeFile(destPath, buffer);
 
-    if (modifiedTime) {
-      const mtime = new Date(modifiedTime);
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.DRIVE_MAX_ATTEMPTS; attempt++) {
+      const temporaryPath = `${destPath}.syncclient-download-${process.pid}-${Date.now()}-${attempt}`;
       try {
-        await fs.utimes(destPath, mtime, mtime);
-      } catch (e) {
-        // Ignore utimes error
+        const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          headers: { Authorization: `Bearer ${this.accessToken}` }
+        });
+        await this.handleDriveResponse(res);
+        if (!res.body) throw new Error('Drive API returned an empty download body');
+
+        const checksum = expectedMd5 ? createHash('md5') : null;
+        const hasher = new Transform({
+          transform(chunk, _encoding, callback) {
+            if (checksum) checksum.update(chunk);
+            callback(null, chunk);
+          }
+        });
+        this.markSelfWritten(temporaryPath);
+        await pipeline(
+          Readable.fromWeb(res.body as any),
+          hasher,
+          fsSync.createWriteStream(temporaryPath, { flags: 'wx' })
+        );
+
+        const downloadedStats = await fs.stat(temporaryPath);
+        if (typeof expectedSize === 'number' && downloadedStats.size !== expectedSize) {
+          throw new Error(`Downloaded size mismatch: expected ${expectedSize}, got ${downloadedStats.size}`);
+        }
+        if (checksum && checksum.digest('hex') !== expectedMd5!.toLowerCase()) {
+          throw new Error('Downloaded MD5 checksum mismatch');
+        }
+
+        this.markSelfWritten(destPath);
+        await fs.rename(temporaryPath, destPath);
+        this.markSelfWritten(destPath);
+        if (modifiedTime) {
+          const mtime = new Date(modifiedTime);
+          try {
+            await fs.utimes(destPath, mtime, mtime);
+          } catch {
+            // Some filesystems do not allow preserving timestamps.
+          }
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (error instanceof Error && (
+          error.message === 'UNAUTHORIZED_EXPIRED_TOKEN' ||
+          error.message === 'DRIVE_PRECONDITION_FAILED_412'
+        )) {
+          throw error;
+        }
+        await fs.rm(temporaryPath, { force: true }).catch(() => { });
+        if (attempt < this.DRIVE_MAX_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, Math.min(32000, 1000 * (2 ** (attempt - 1)))));
+        }
       }
     }
+    throw lastError instanceof Error ? lastError : new Error('Drive download failed');
   }
 
-  private async uploadDriveBinary(parentId: string, filePath: string, targetName?: string, existingFileId?: string): Promise<DriveFile> {
+  private async uploadDriveBinary(parentId: string, filePath: string, targetName?: string, existingFileId?: string, vectorClock?: string): Promise<DriveFile> {
     if (!this.accessToken) throw new Error('No OAuth access token set');
     this.driveFolderCache.delete(parentId);
     const name = targetName || path.basename(filePath);
-    const fileBuffer = await fs.readFile(filePath);
+    const stats = await fs.stat(filePath);
+    const fileSize = stats.size;
+    const resumableThreshold = 5 * 1024 * 1024;
 
     let mimeType = 'application/octet-stream';
     const ext = path.extname(name).toLowerCase();
@@ -1833,52 +1970,66 @@ class SyncEngine {
     else if (ext === '.txt') mimeType = 'text/plain';
     else if (ext === '.json') mimeType = 'application/json';
 
-    const metadata = existingFileId ? { name } : { name, parents: [parentId] };
+    const appProperties = vectorClock
+      ? VectorClockManager.toAppProperties(VectorClockManager.fromString(vectorClock))
+      : undefined;
+    const metadata = existingFileId
+      ? { name, ...(appProperties ? { appProperties } : {}) }
+      : { name, parents: [parentId], ...(appProperties ? { appProperties } : {}) };
+    const initUrl = existingFileId
+      ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&fields=id,name,mimeType,modifiedTime,webViewLink`
+      : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,modifiedTime,webViewLink';
 
-    try {
-      const initUrl = existingFileId
-        ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&fields=id,name,mimeType,modifiedTime,webViewLink`
-        : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,modifiedTime,webViewLink';
+    if (fileSize >= resumableThreshold) {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= this.DRIVE_MAX_ATTEMPTS; attempt++) {
+        try {
+          const initRes = await this.driveRequest(initUrl, {
+            method: existingFileId ? 'PATCH' : 'POST',
+            headers: {
+              Authorization: `Bearer ${this.accessToken}`,
+              'Content-Type': 'application/json; charset=UTF-8',
+              'X-Upload-Content-Type': mimeType,
+              'X-Upload-Content-Length': fileSize.toString()
+            },
+            body: JSON.stringify(metadata)
+          });
+          await this.handleDriveResponse(initRes);
+          const sessionUri = initRes.headers.get('Location');
+          if (!sessionUri) throw new Error('Drive resumable upload did not return a session URI');
 
-      // v2: Safe upload con If-Match: etag si existe (optimistic locking)
-      const initHeaders: Record<string, string> = {
-        Authorization: `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json; charset=UTF-8',
-        'X-Upload-Content-Type': mimeType,
-        'X-Upload-Content-Length': fileBuffer.length.toString()
-      };
-
-      if (existingFileId && this.db) {
-        // Buscar etag en la DB para este archivo
-        const dbState = this.db.getFolderState(''); // no tenemos pairId aquí
-        // Nota: el etag se pasa en el metadata de la DB, pero aquí no tenemos pairId
-        // La validación con etag se hace a nivel de reconcilación HTTP 304
-      }
-
-      const initRes = await fetch(initUrl, {
-        method: existingFileId ? 'PATCH' : 'POST',
-        headers: initHeaders,
-        body: JSON.stringify(metadata)
-      });
-
-      if (initRes.ok) {
-        const sessionUri = initRes.headers.get('Location');
-        if (sessionUri) {
-          const uploadRes = await fetch(sessionUri, {
+          const uploadRes = await this.driveRequest(sessionUri, {
             method: 'PUT',
             headers: {
               'Content-Type': mimeType,
-              'Content-Length': fileBuffer.length.toString()
+              'Content-Length': fileSize.toString()
             },
-            body: fileBuffer as any
-          });
+            body: fsSync.createReadStream(filePath) as any,
+            duplex: 'half'
+          }, 1);
           if (uploadRes.ok) return (await uploadRes.json()) as DriveFile;
+          if (!this.isTransientDriveStatus(uploadRes.status)) {
+            await this.handleDriveResponse(uploadRes);
+          }
+          await uploadRes.body?.cancel().catch(() => { });
+          lastError = new Error(`Drive resumable upload failed (${uploadRes.status})`);
+        } catch (error) {
+          lastError = error;
+          if (error instanceof Error && (
+            error.message === 'UNAUTHORIZED_EXPIRED_TOKEN' ||
+            error.message === 'DRIVE_PRECONDITION_FAILED_412'
+          )) {
+            throw error;
+          }
+        }
+        if (attempt < this.DRIVE_MAX_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(resolve, Math.min(32000, 1000 * (2 ** (attempt - 1)))));
         }
       }
-    } catch (e: any) {
-      console.warn('[SyncEngine/Backend] Fallback a subida multipart tras reintentar resumable:', e.message);
+      throw lastError instanceof Error ? lastError : new Error('Drive resumable upload failed');
     }
 
+    const fileBuffer = await fs.readFile(filePath);
     const boundary = '-------SyncClientBoundary' + Math.random().toString(36);
     const header = Buffer.from(
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
@@ -1886,14 +2037,11 @@ class SyncEngine {
     );
     const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
     const bodyPayload = Buffer.concat([header, fileBuffer, footer]);
-
     const url = existingFileId
       ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart&fields=id,name,mimeType,modifiedTime,webViewLink`
       : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,webViewLink';
-    const method = existingFileId ? 'PATCH' : 'POST';
-
-    const res = await fetch(url, {
-      method,
+    const res = await this.driveRequest(url, {
+      method: existingFileId ? 'PATCH' : 'POST',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         'Content-Type': `multipart/related; boundary=${boundary}`,
@@ -1901,7 +2049,6 @@ class SyncEngine {
       },
       body: bodyPayload as any
     });
-
     await this.handleDriveResponse(res);
     return (await res.json()) as DriveFile;
   }

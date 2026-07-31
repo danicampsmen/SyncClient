@@ -1,181 +1,310 @@
-/**
- * B12: Tests unitarios para CoreSyncLogic
- * Cubre matchesIgnorePattern, parseNumberedFilename, groupAndSortDuplicates, y detección de conflictos
- */
-import { CoreSyncLogic } from './CoreSyncLogic';
+import { describe, expect, it } from 'vitest';
+import {
+  ANDROID_STARNOTE_BASE,
+  ANDROID_STARNOTE_EXPORT,
+  CoreSyncLogic,
+  DEFAULT_LOCAL_DIR_NAME,
+  DEFAULT_REMOTE_PATH,
+  RemoteEntry,
+} from './CoreSyncLogic';
 
-// --- matchesIgnorePattern ---
-console.log('=== matchesIgnorePattern ===');
+describe('CoreSyncLogic.matchesIgnorePattern', () => {
+  it('rejects empty and missing names without throwing', () => {
+    expect(CoreSyncLogic.matchesIgnorePattern('')).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern(null as unknown as string)).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern(undefined as unknown as string)).toBe(false);
+  });
 
-// Casos borde: nombres vacíos o nulos
-console.assert(CoreSyncLogic.matchesIgnorePattern('') === false, 'Empty name → false');
-console.assert(CoreSyncLogic.matchesIgnorePattern(null as any) === false, 'Null name → false');
-console.assert(CoreSyncLogic.matchesIgnorePattern(undefined as any) === false, 'Undefined name → false');
+  it('matches the default temporary, hidden, and editor files', () => {
+    expect(CoreSyncLogic.matchesIgnorePattern('archivo.tmp')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('ARCHIVO.TMP')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('archivo.TMP.txt')).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('documento.aux')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('documento.log')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('documento.out')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('.gitignore')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('nota-SAVE-ERROR')).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('.nota-SAVE-ERROR')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('.DS_Store')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('.git')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('node_modules')).toBe(false);
+  });
 
-// Extensión: *.tmp debe coincidir
-console.assert(CoreSyncLogic.matchesIgnorePattern('archivo.tmp') === true, '*.tmp match');
-console.assert(CoreSyncLogic.matchesIgnorePattern('ARCHIVO.TMP') === true, '*.tmp case insensitive');
-console.assert(CoreSyncLogic.matchesIgnorePattern('archivo.TMP.txt') === false, '*.tmp no debe matchear .tmp.txt');
+  it('does not ignore regular source and document files', () => {
+    expect(CoreSyncLogic.matchesIgnorePattern('apuntes.pdf')).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('tesis.tex')).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('main.py')).toBe(false);
+  });
 
-// LaTeX auxiliares
-console.assert(CoreSyncLogic.matchesIgnorePattern('documento.aux') === true, '*.aux match');
-console.assert(CoreSyncLogic.matchesIgnorePattern('documento.log') === true, '*.log match');
-console.assert(CoreSyncLogic.matchesIgnorePattern('documento.out') === true, '*.out match');
+  it('supports custom patterns and falls back to defaults for an empty list', () => {
+    expect(CoreSyncLogic.matchesIgnorePattern('debug.log', ['*.log', '*.tmp'])).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('debug.txt', ['*.log', '*.tmp'])).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('documento.log', [])).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('documento.pdf', [])).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('file.txt', [''])).toBe(false);
+  });
+});
 
-// Archivos ocultos
-console.assert(CoreSyncLogic.matchesIgnorePattern('.gitignore') === true, '.* pattern for hidden files');
+describe('CoreSyncLogic.parseNumberedFilename', () => {
+  it.each([
+    ['apuntes(1).pdf', { isNumbered: true, baseName: 'apuntes.pdf', version: 1, extension: 'pdf' }],
+    ['rotman(15).pdf', { isNumbered: true, baseName: 'rotman.pdf', version: 15, extension: 'pdf' }],
+    ['nota (3).txt', { isNumbered: true, baseName: 'nota.txt', version: 3, extension: 'txt' }],
+    ['archivo(2)(1).pdf', { isNumbered: true, baseName: 'archivo.pdf', version: 1, extension: 'pdf' }],
+    ['documento.pdf', { isNumbered: false, baseName: 'documento.pdf', version: 0, extension: 'pdf' }],
+    ['README', { isNumbered: false, baseName: 'README', version: 0, extension: '' }],
+  ])('parses %s', (filename, expected) => {
+    expect(CoreSyncLogic.parseNumberedFilename(filename)).toEqual(expected);
+  });
 
-// Archivos con patrón wildcard SAVE-ERROR
-console.assert(CoreSyncLogic.matchesIgnorePattern('nota-SAVE-ERROR') === false, 'SAVE-ERROR exact match requires .*-SAVE-ERROR* format');
-// El patrón es .*-SAVE-ERROR* → debería matchear archivos que empiezan con punto
-console.assert(CoreSyncLogic.matchesIgnorePattern('.nota-SAVE-ERROR') === true, '.*-SAVE-ERROR* match');
+  it('keeps names without an extension as ordinary files', () => {
+    expect(CoreSyncLogic.parseNumberedFilename('nota(1)')).toEqual({
+      isNumbered: false,
+      baseName: 'nota(1)',
+      version: 0,
+      extension: '',
+    });
+  });
+});
 
-// Archivos con nombre exacto (node_modules se maneja en settings, no en defaults)
-console.assert(CoreSyncLogic.matchesIgnorePattern('.DS_Store') === true, '.DS_Store hidden file');
-console.assert(CoreSyncLogic.matchesIgnorePattern('.git') === true, '.git dir');
-console.assert(CoreSyncLogic.matchesIgnorePattern('node_modules') === false, 'node_modules not in shared defaults (handled by engine settings)');
+describe('CoreSyncLogic routes and settle timing', () => {
+  it('exposes the platform route contracts', () => {
+    expect(DEFAULT_LOCAL_DIR_NAME).toBe('Apuntes_Tablet_StarNote');
+    expect(DEFAULT_REMOTE_PATH).toBe('GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote');
+    expect(ANDROID_STARNOTE_BASE).toBe('/storage/emulated/0/Documents/StarNote');
+    expect(ANDROID_STARNOTE_EXPORT).toBe('/storage/emulated/0/Documents/StarNote/export');
+  });
 
-// Archivos normales que NO deben ser ignorados
-console.assert(CoreSyncLogic.matchesIgnorePattern('apuntes.pdf') === false, 'PDF → not ignored');
-console.assert(CoreSyncLogic.matchesIgnorePattern('tesis.tex') === false, '.tex → not ignored');
-console.assert(CoreSyncLogic.matchesIgnorePattern('main.py') === false, '.py → not ignored');
+  it.each([
+    [undefined, DEFAULT_REMOTE_PATH],
+    ['RemoteServer:/Documentos-Ubuntu/Apuntes', 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes'],
+    ['Drive:/Documentos-Ubuntu-Fayfer/Apuntes', 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes'],
+    ['/Documentos-Ubuntu/Apuntes', 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes'],
+    ['Documentos-Ubuntu-Fayfer/Apuntes', 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes'],
+    ['GoogleDrive:/Apuntes en pdf - tablet', DEFAULT_REMOTE_PATH],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(CoreSyncLogic.normalizeRemotePath(input)).toBe(expected);
+  });
 
-// Patrones personalizados
-console.assert(CoreSyncLogic.matchesIgnorePattern('debug.log', ['*.log', '*.tmp']) === true, 'Custom pattern *.log');
-console.assert(CoreSyncLogic.matchesIgnorePattern('debug.txt', ['*.log', '*.tmp']) === false, 'Custom pattern: .txt not in list');
+  it('only considers a file ready after the settle buffer', () => {
+    expect(CoreSyncLogic.isReadyForSync(100_000, 2_000, 101_999)).toBe(false);
+    expect(CoreSyncLogic.isReadyForSync(100_000, 2_000, 102_000)).toBe(true);
+    expect(CoreSyncLogic.isReadyForSync(0, 2_000, 0)).toBe(true);
+  });
+});
 
-console.log('✅ matchesIgnorePattern: All assertions passed');
+describe('CoreSyncLogic.groupAndSortDuplicates', () => {
+  it('keeps independent files in independent groups', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'a.pdf', mtime: 1000 },
+      { name: 'b.pdf', mtime: 2000 },
+    ]);
 
-// --- parseNumberedFilename ---
-console.log('\n=== parseNumberedFilename ===');
+    expect(groups.size).toBe(2);
+    expect(groups.get('a.pdf')).toHaveLength(1);
+    expect(groups.get('b.pdf')).toHaveLength(1);
+  });
 
-// Formato StarNote: nombre(numero).ext
-const r1 = CoreSyncLogic.parseNumberedFilename('apuntes(1).pdf');
-console.assert(r1.isNumbered === true, 'Numbered detected');
-console.assert(r1.baseName === 'apuntes.pdf', 'Base name extracted');
-console.assert(r1.version === 1, 'Version extracted');
-console.assert(r1.extension === 'pdf', 'Extension extracted');
+  it('selects the newest mtime as the winner', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'nota(1).pdf', mtime: 1000 },
+      { name: 'nota(2).pdf', mtime: 2000 },
+      { name: 'nota(3).pdf', mtime: 1500 },
+    ]);
 
-// Número alto
-const r2 = CoreSyncLogic.parseNumberedFilename('rotman(15).pdf');
-console.assert(r2.isNumbered === true, 'Numbered #15');
-console.assert(r2.baseName === 'rotman.pdf', 'Base rotman');
-console.assert(r2.version === 15, 'Version 15');
+    expect(groups.get('nota.pdf')?.[0]).toMatchObject({
+      name: 'nota(2).pdf',
+      version: 2,
+    });
+  });
 
-// Espacio antes del paréntesis
-const r3 = CoreSyncLogic.parseNumberedFilename('nota (3).txt');
-console.assert(r3.isNumbered === true, 'Numbered with space');
-console.assert(r3.baseName === 'nota.txt', 'Base with space');
+  it('uses the highest version when mtimes are equal', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'doc(1).pdf', mtime: 1000 },
+      { name: 'doc(5).pdf', mtime: 1000 },
+      { name: 'doc(3).pdf', mtime: 1000 },
+    ]);
 
-// Doble numeración (poco común pero válido)
-const r4 = CoreSyncLogic.parseNumberedFilename('archivo(2)(1).pdf');
-console.assert(r4.isNumbered === true, 'Double numbered detected');
-console.assert(r4.version === 1, 'Last version wins');
+    expect(groups.get('doc.pdf')?.[0]).toMatchObject({
+      name: 'doc(5).pdf',
+      version: 5,
+    });
+  });
 
-// Archivo normal sin numeración
-const r5 = CoreSyncLogic.parseNumberedFilename('documento.pdf');
-console.assert(r5.isNumbered === false, 'Normal file: not numbered');
-console.assert(r5.baseName === 'documento.pdf', 'Normal file: baseName = full name');
-console.assert(r5.version === 0, 'Normal file: version = 0');
-console.assert(r5.extension === 'pdf', 'Normal file: extension extracted');
+  it('allows an unnumbered file to win by mtime', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'base.pdf', mtime: 2000 },
+      { name: 'base(1).pdf', mtime: 1000 },
+      { name: 'base(2).pdf', mtime: 1500 },
+    ]);
 
-// Sin extensión
-const r6 = CoreSyncLogic.parseNumberedFilename('README');
-console.assert(r6.isNumbered === false, 'No extension: not numbered');
-console.assert(r6.extension === '', 'No extension: empty');
+    expect(groups.get('base.pdf')?.[0]).toMatchObject({
+      name: 'base.pdf',
+      version: 0,
+    });
+  });
 
-console.log('✅ parseNumberedFilename: All assertions passed');
+  it('uses mtime over version when the timestamps differ', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'x(9).pdf', mtime: 1000 },
+      { name: 'x(1).pdf', mtime: 5000 },
+    ]);
 
-// --- groupAndSortDuplicates ---
-console.log('\n=== groupAndSortDuplicates ===');
+    expect(groups.get('x.pdf')?.[0]).toMatchObject({
+      name: 'x(1).pdf',
+      version: 1,
+    });
+  });
 
-// Caso 1: Archivos normales sin duplicados
-const items1 = [
-    { name: 'a.pdf', mtime: 1000 },
-    { name: 'b.pdf', mtime: 2000 },
-];
-const g1 = CoreSyncLogic.groupAndSortDuplicates(items1);
-console.assert(g1.size === 2, '2 unique files → 2 groups');
-console.assert(g1.get('a.pdf')!.length === 1, 'a.pdf solo');
-console.assert(g1.get('b.pdf')!.length === 1, 'b.pdf solo');
+  it('returns an empty map for an empty input', () => {
+    expect(CoreSyncLogic.groupAndSortDuplicates([])).toEqual(new Map());
+  });
+});
 
-// Caso 2: Duplicados numerados — versión más reciente gana
-const items2 = [
-    { name: 'nota(1).pdf', mtime: 1000 },
-    { name: 'nota(2).pdf', mtime: 2000 },
-    { name: 'nota(3).pdf', mtime: 1500 }, // más reciente que (1) pero no que (2)
-];
-const g2 = CoreSyncLogic.groupAndSortDuplicates(items2);
-const winner2 = g2.get('nota.pdf')![0];
-console.assert(winner2.name === 'nota(2).pdf', 'Winner: most recent mtime');
-console.assert(winner2.version === 2, 'Winner version matches');
+const remoteFile = (overrides: Partial<RemoteEntry> = {}): RemoteEntry => ({
+  id: 'remote-1',
+  name: 'nota.pdf',
+  mimeType: 'application/pdf',
+  modifiedTime: '1970-01-01T00:00:10.000Z',
+  size: '100',
+  ...overrides,
+});
 
-// Caso 3: Timestamps iguales — versión más alta gana
-const items3 = [
-    { name: 'doc(1).pdf', mtime: 1000 },
-    { name: 'doc(5).pdf', mtime: 1000 },
-    { name: 'doc(3).pdf', mtime: 1000 },
-];
-const g3 = CoreSyncLogic.groupAndSortDuplicates(items3);
-const winner3 = g3.get('doc.pdf')![0];
-console.assert(winner3.name === 'doc(5).pdf', 'Equal mtime: highest version wins');
-console.assert(winner3.version === 5, 'Version 5');
+const dbFile = (overrides: Partial<{ localMtime: number; remoteMtime: number; remoteId: string; fileSize: number }> = {}) => ({
+  localMtime: 10_000,
+  remoteMtime: 10_000,
+  remoteId: 'remote-1',
+  fileSize: 100,
+  ...overrides,
+});
 
-// Caso 4: Mezcla con archivo base (sin número)
-const items4 = [
-    { name: 'base.pdf', mtime: 2000 },
-    { name: 'base(1).pdf', mtime: 1000 },
-    { name: 'base(2).pdf', mtime: 1500 },
-];
-const g4 = CoreSyncLogic.groupAndSortDuplicates(items4);
-const winner4 = g4.get('base.pdf')![0];
-console.assert(winner4.name === 'base.pdf', 'Base file with highest mtime wins');
+describe('CoreSyncLogic.computeSyncPlan', () => {
+  it('does nothing for an unchanged known file', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 10_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile()]]),
+      new Map([['nota.pdf', dbFile()]]),
+      'device-a',
+    );
 
-// Caso 5: Diferencia de mtime > 2s = prevalece mtime sobre versión
-const items5 = [
-    { name: 'x(9).pdf', mtime: 1000 },
-    { name: 'x(1).pdf', mtime: 5000 }, // 4s más reciente que (9), incluso si versión es menor
-];
-const g5 = CoreSyncLogic.groupAndSortDuplicates(items5);
-const winner5 = g5.get('x.pdf')![0];
-console.assert(winner5.name === 'x(1).pdf', 'Significant time diff: mtime wins over version number');
+    expect(plan).toEqual({
+      uploads: [],
+      downloads: [],
+      deleteLocal: [],
+      deleteRemote: [],
+      conflicts: [],
+    });
+  });
 
-// Caso 6: Array vacío
-const g6 = CoreSyncLogic.groupAndSortDuplicates([]);
-console.assert(g6.size === 0, 'Empty array → empty map');
+  it('uploads a new local file and preserves a matching remote id', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 10_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile()]]),
+      new Map(),
+      'device-a',
+    );
 
-console.log('✅ groupAndSortDuplicates: All assertions passed');
+    expect(plan.uploads).toEqual([{
+      localPath: 'nota.pdf',
+      remoteName: 'nota.pdf',
+      remoteId: 'remote-1',
+      vectorClock: '{"device-a":1}',
+    }]);
+  });
 
-// --- Detección de conflictos (combinaciones de mtime) ---
-console.log('\n=== Conflict Detection (mtime combinations) ===');
+  it('uploads when only the local side changed', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 14_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile()]]),
+      new Map([['nota.pdf', dbFile()]]),
+      'device-a',
+    );
 
-// Simular lógica de conflicto del syncEngine:
-// Conflicto = local cambió (+5s) Y remoto cambió (+5s) desde el manifiesto
-function isConflict(localMtime: number, remoteMtime: number, manifestLocal: number, manifestRemote: number): boolean {
-    return (localMtime > manifestLocal + 5000) && (remoteMtime > manifestRemote + 5000);
-}
+    expect(plan.uploads).toHaveLength(1);
+    expect(plan.downloads).toHaveLength(0);
+    expect(plan.conflicts).toHaveLength(0);
+  });
 
-// Solo local cambió → no conflicto (subir)
-console.assert(isConflict(20000, 10000, 10000, 10000) === false, 'Only local changed → no conflict');
+  it('downloads when only a known remote file changed', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map(),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:20.000Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
 
-// Solo remoto cambió → no conflicto (descargar)
-console.assert(isConflict(10000, 20000, 10000, 10000) === false, 'Only remote changed → no conflict');
+    expect(plan.downloads[0]).toMatchObject({
+      remoteFile: remoteFile({ modifiedTime: '1970-01-01T00:00:20.000Z' }),
+      localPath: 'nota.pdf',
+    });
+    expect(plan.uploads).toHaveLength(0);
+    expect(plan.conflicts).toHaveLength(0);
+  });
 
-// Ambos cambiaron → conflicto
-console.assert(isConflict(20000, 20000, 10000, 10000) === true, 'Both changed → conflict detected');
+  it('reports a conflict only when both sides changed beyond the threshold', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 14_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:20.000Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
 
-// Cambio pequeño (<5s) en local → no cuenta
-console.assert(isConflict(12000, 20000, 10000, 10000) === false, 'Small local change → no conflict');
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.conflicts[0]).toMatchObject({
+      localPath: 'nota.pdf',
+      remoteFile: { id: 'remote-1', name: 'nota.pdf' },
+      localVc: '{"device-a":1}',
+      remoteVc: '{}',
+    });
+    expect(plan.uploads).toHaveLength(0);
+    expect(plan.downloads).toHaveLength(0);
+  });
 
-// Cambio pequeño (<5s) en remoto → no cuenta
-console.assert(isConflict(20000, 12000, 10000, 10000) === false, 'Small remote change → no conflict');
+  it('does not report a conflict when a change is exactly at the threshold', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 13_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:13.000Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
 
-// Ninguno cambió significativamente
-console.assert(isConflict(11000, 11000, 10000, 10000) === false, 'No changes → no conflict');
+    expect(plan.conflicts).toHaveLength(0);
+    expect(plan.uploads).toHaveLength(0);
+    expect(plan.downloads).toHaveLength(0);
+  });
 
-// Timestamps idénticos en manifiesto y actuales
-console.assert(isConflict(10000, 10000, 10000, 10000) === false, 'Identical timestamps → no conflict');
+  it('downloads remote-only files and schedules missing files for deletion', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map(),
+      new Map([['new.pdf', remoteFile({ id: 'new-remote', name: 'new.pdf' })]]),
+      new Map([
+        ['new.pdf', dbFile({ remoteId: 'old-remote' })],
+        ['gone.pdf', dbFile({ remoteId: 'gone-remote' })],
+        ['local-only.pdf', dbFile({ remoteId: '' })],
+      ]),
+      'device-a',
+    );
 
-console.log('✅ Conflict Detection: All assertions passed');
+    expect(plan.downloads[0]).toMatchObject({
+      localPath: 'new.pdf',
+      remoteFile: { id: 'new-remote', name: 'new.pdf' },
+    });
+    expect(plan.deleteRemote).toEqual([{ remoteId: 'gone-remote' }]);
+    expect(plan.deleteLocal).toEqual([{ localPath: 'local-only.pdf' }]);
+  });
+});
 
-console.log('\n🎉 All tests passed successfully!');
+describe('CoreSyncLogic.mergeClocksForDedup', () => {
+  it('merges maximum dimensions, ignores malformed losers, and increments this device', () => {
+    expect(CoreSyncLogic.mergeClocksForDedup(
+      '{"device-a":3,"device-b":1}',
+      ['{"device-a":1,"device-b":5,"device-c":2}', '{invalid'],
+      'device-a',
+    )).toBe('{"device-a":4,"device-b":5,"device-c":2}');
+  });
+
+  it('increments the winner device even without losers', () => {
+    expect(CoreSyncLogic.mergeClocksForDedup('{"device-a":3}', [], 'device-a'))
+      .toBe('{"device-a":4}');
+  });
+});

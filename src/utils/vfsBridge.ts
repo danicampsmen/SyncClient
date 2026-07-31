@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { DEFAULT_LOCAL_DIR_NAME, ANDROID_STARNOTE_BASE, ANDROID_STARNOTE_EXPORT } from '../shared/CoreSyncLogic';
+import { backendFetch } from '../services/backendSession';
 
 /**
  * VFSBridge (Virtual File System Bridge)
@@ -100,7 +101,7 @@ export class VFSBridge {
       }
     } else {
       try {
-        const res = await fetch(`http://localhost:3000/api/local/files?path=${encodeURIComponent(dirPath)}`);
+        const res = await backendFetch(`/api/local/files?path=${encodeURIComponent(dirPath)}`);
         if (!res.ok) return [];
         const data = await res.json();
         return (data.files || [])
@@ -136,11 +137,12 @@ export class VFSBridge {
       }
     } else {
       try {
-        const res = await fetch(`http://localhost:3000/api/local/dir`, {
+        const res = await backendFetch(`/api/local/dir?path=${encodeURIComponent(dirPath)}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: dirPath })
         });
+        if (!res.ok) {
+          console.warn(`[VFSBridge/Linux] Error creando carpeta (${res.status})`);
+        }
         return res.ok;
       } catch (e) {
         console.error('[VFSBridge/Linux] Error creando carpeta en servidor local:', e);
@@ -161,7 +163,7 @@ export class VFSBridge {
       });
       return typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
     } else {
-      const res = await fetch(`/api/local/content?path=${encodeURIComponent(filePath)}`);
+      const res = await backendFetch(`/api/local/content?path=${encodeURIComponent(filePath)}`);
       if (!res.ok) throw new Error('Error al leer archivo en servidor de Linux');
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
@@ -185,10 +187,10 @@ export class VFSBridge {
       });
       console.log(`[VFSBridge/Android] Guardado exitoso con Capacitor Filesystem: ${filePath}`);
     } else {
-      const res = await fetch('http://localhost:3000/api/local/content', {
+      const res = await backendFetch(`/api/local/content?path=${encodeURIComponent(filePath)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: filePath, content: data })
+        body: JSON.stringify({ content: data })
       });
       if (!res.ok) throw new Error('Error al guardar en disco Linux');
     }
@@ -265,11 +267,10 @@ export class VFSBridge {
       }
     } else {
       try {
-        const res = await fetch('http://localhost:3000/api/local/deduplicate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: dirPath })
+        const res = await backendFetch(`/api/local/deduplicate?path=${encodeURIComponent(dirPath)}`, {
+          method: 'POST'
         });
+        if (!res.ok) return { deleted: 0, renamed: 0 };
         const data = await res.json();
         if (data.success) {
           deleted = data.deleted || 0;

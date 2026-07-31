@@ -93,6 +93,7 @@ npm install
 | `npm run electron:build` | Genera el instalador (electron-builder) |
 | `npm run preview` | Previsualiza el build de Vite |
 | `npm run lint` | Verifica tipos TypeScript (`tsc --noEmit`) |
+| `npm test` | Ejecuta la suite de pruebas Vitest |
 | `npm run android:build` | Compila y copia a Capacitor Android |
 | `npm run android:deploy` | Despliega a dispositivo Android conectado |
 

@@ -3,6 +3,7 @@ import path from "path";
 import os from "os";
 import fs from "fs/promises";
 import fsSync from "fs";
+import crypto from "crypto";
 import { syncEngine } from "./src/backend/syncEngine";
 
 // --- Utilidades de validación de entrada (Fix 11) ---
@@ -13,8 +14,7 @@ const ALLOWED_BASE_DIRS: string[] = [
   path.join(os.homedir(), 'Descargas'),
   path.join(os.homedir(), '.config', 'syncclient'),
   '/media',
-  '/run/media',
-  '/tmp'
+  '/run/media'
 ];
 
 /**
@@ -23,18 +23,60 @@ const ALLOWED_BASE_DIRS: string[] = [
  */
 function isPathAllowed(targetPath: string): boolean {
   if (!targetPath || typeof targetPath !== 'string') return false;
-  // Rechazar rutas con secuencias de traversal explícitas
-  if (targetPath.includes('..')) return false;
-  // B10 Fix: Resolver symlinks antes de validar para prevenir bypass
+  if (targetPath.includes('\0') || targetPath.includes('\\')) return false;
+  // Rechazar únicamente segmentos de traversal; nombres como "notes..pdf" son válidos.
+  if (targetPath.split(path.sep).includes('..')) return false;
+
+  const absolute = path.resolve(targetPath);
+  const isWithin = (child: string, base: string): boolean => {
+    const relative = path.relative(base, child);
+    return relative === '' || (
+      relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative)
+    );
+  };
+  const allowedBases = ALLOWED_BASE_DIRS.flatMap((base) => {
+    let candidate = path.resolve(base);
+    const missingSegments: string[] = [];
+    try {
+      return [fsSync.realpathSync.native(candidate)];
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') return [];
+      while (candidate !== path.dirname(candidate)) {
+        missingSegments.unshift(path.basename(candidate));
+        candidate = path.dirname(candidate);
+        try {
+          const parent = fsSync.realpathSync.native(candidate);
+          return [path.join(parent, ...missingSegments)];
+        } catch (ancestorError: any) {
+          if (ancestorError?.code !== 'ENOENT' && ancestorError?.code !== 'ENOTDIR') return [];
+        }
+      }
+      return [];
+    }
+  });
+
   let resolved: string;
   try {
-    resolved = fsSync.realpathSync(targetPath);
-  } catch {
-    // Si el archivo no existe aún, usar path.resolve como fallback
-    resolved = path.resolve(targetPath);
+    resolved = fsSync.realpathSync.native(absolute);
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') return false;
+    // Para una escritura nueva, canonicalizar el ancestro existente más cercano.
+    let parent = absolute;
+    while (parent !== path.dirname(parent)) {
+      try {
+        resolved = fsSync.realpathSync.native(parent);
+        return allowedBases.some((base) => isWithin(resolved, base));
+      } catch (ancestorError: any) {
+        if (ancestorError?.code !== 'ENOENT' && ancestorError?.code !== 'ENOTDIR') return false;
+        parent = path.dirname(parent);
+      }
+    }
+    return false;
   }
-  // Verificar que la ruta comience con alguno de los directorios permitidos
-  return ALLOWED_BASE_DIRS.some(base => resolved.startsWith(base));
+
+  return allowedBases.some((base) => isWithin(resolved, base));
 }
 
 /** Valida que un valor sea un string no vacío y de longitud razonable */
@@ -58,6 +100,9 @@ async function startServer() {
   const allowedOrigins = new Set([
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'http://localhost',
+    'capacitor://localhost',
+    'ionic://localhost',
     process.env.CORS_ORIGIN || '',
   ].filter(Boolean));
 
@@ -67,8 +112,9 @@ async function startServer() {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-SyncClient-Client');
     if (req.method === 'OPTIONS') {
       res.sendStatus(200);
       return;
@@ -76,13 +122,100 @@ async function startServer() {
     next();
   });
 
-  // --- RELAY DE OAUTH PARA MÓVIL (Chrome Custom Tab → PC Backend → App) ---
-  let pendingOAuthToken: string | null = null;
-  let pendingOAuthTimestamp = 0;
+  type Session = { createdAt: number; lastSeenAt: number };
+  const sessions = new Map<string, Session>();
+  const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+  const sessionCookieName = 'syncclient_session';
+  const newSessionId = () => crypto.randomBytes(32).toString('base64url');
 
-  // Página de captura del token: Chrome Custom Tab la carga cuando Google redirige aquí
-  // Soporta tanto implicit flow (access_token) como authorization code flow (code)
-  app.get('/api/oauth/callback', (_req, res) => {
+  const getCookie = (req: express.Request, name: string): string | null => {
+    const cookies = req.get('Cookie')?.split(';') || [];
+    const cookie = cookies.find((value) => value.trim().startsWith(`${name}=`));
+    return cookie ? decodeURIComponent(cookie.trim().slice(name.length + 1)) : null;
+  };
+
+  const getSessionId = (req: express.Request): string | null => {
+    const bearer = req.get('Authorization');
+    if (bearer?.startsWith('Bearer ')) return bearer.slice('Bearer '.length).trim() || null;
+    return getCookie(req, sessionCookieName);
+  };
+
+  const setSessionCookie = (res: express.Response, sessionId: string): void => {
+    res.setHeader(
+      'Set-Cookie',
+      `${sessionCookieName}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`
+    );
+  };
+
+  const createSession = (): string => {
+    const now = Date.now();
+    const sessionId = newSessionId();
+    sessions.set(sessionId, { createdAt: now, lastSeenAt: now });
+    return sessionId;
+  };
+
+  const cleanupSessions = setInterval(() => {
+    const cutoff = Date.now() - SESSION_TTL_MS;
+    for (const [sessionId, session] of sessions) {
+      if (session.lastSeenAt < cutoff) sessions.delete(sessionId);
+    }
+  }, 15 * 60 * 1000);
+  cleanupSessions.unref();
+
+  // Bootstrap anónimo sólo crea una sesión local; no entrega tokens de Google.
+  // Android recibe un bearer efímero porque algunos WebView no conservan cookies.
+  app.get('/api/session/bootstrap', (req, res) => {
+    let sessionId = getSessionId(req);
+    const current = sessionId ? sessions.get(sessionId) : undefined;
+    if (!current || Date.now() - current.lastSeenAt > SESSION_TTL_MS) {
+      sessionId = createSession();
+      setSessionCookie(res, sessionId);
+    } else {
+      current.lastSeenAt = Date.now();
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    const response: { authenticated: boolean; sessionToken?: string } = { authenticated: true };
+    if (req.get('X-SyncClient-Client') === 'android') response.sessionToken = sessionId;
+    res.json(response);
+  });
+
+  const oauthTransactions = new Map<string, {
+    sessionId: string;
+    createdAt: number;
+    code?: string;
+  }>();
+  const OAUTH_TRANSACTION_TTL_MS = 10 * 60 * 1000;
+
+  // Todas las APIs, incluido el relay OAuth, requieren la sesión local.
+  app.use('/api', (req, res, next) => {
+    // El navegador de Android no comparte cookies con el WebView de la app.
+    // El state de alta entropía es el único permiso para entregar el code al relay;
+    // la lectura posterior sigue exigiendo la sesión local de la app.
+    if (req.path === '/session/bootstrap' || req.path === '/oauth/callback' ||
+      (req.path === '/oauth/token' && req.method === 'POST')) return next();
+    const sessionId = getSessionId(req);
+    const session = sessionId ? sessions.get(sessionId) : undefined;
+    if (!session || Date.now() - session.lastSeenAt > SESSION_TTL_MS) {
+      return res.status(401).json({ error: 'Sesión local requerida' });
+    }
+    const origin = req.get('Origin');
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) &&
+      origin && !allowedOrigins.has(origin)) {
+      return res.status(403).json({ error: 'Origen no permitido' });
+    }
+    session.lastSeenAt = Date.now();
+    (req as express.Request & { sessionId?: string }).sessionId = sessionId!;
+    next();
+  });
+
+  // --- RELAY DE OAUTH PARA MÓVIL (Chrome Custom Tab → PC Backend → App) ---
+
+  // La página de callback nunca contiene tokens; sólo reenvía el código una vez.
+  app.get('/api/oauth/callback', (req, res) => {
+    if (!req.query.state || !req.query.code) {
+      return res.status(400).send('Solicitud OAuth inválida.');
+    }
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html>
 <html lang="es">
@@ -107,47 +240,27 @@ async function startServer() {
   </div>
   <script>
     (async function() {
-      // Intentar extraer parámetros del hash (implicit flow) o query string (authorization code flow)
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const queryParams = new URLSearchParams(window.location.search);
-      const token = hashParams.get('access_token');
       const code = queryParams.get('code');
       const state = queryParams.get('state');
 
-      if (token) {
-        // Implicit flow: enviar token al relay
+      if (code && state) {
         try {
-          await fetch('http://localhost:3000/api/oauth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
-          });
-        } catch (e) {}
-        document.getElementById('icon').textContent = '\u2705';
-        document.getElementById('title').textContent = '\u00a1Listo! Sesión iniciada.';
-        document.getElementById('msg').textContent = 'Puedes volver a la app SyncClient.';
-        setTimeout(() => window.close && window.close(), 1500);
-      } else if (code && state) {
-        // Authorization code flow: relay el código para que la app lo intercambie
-        try {
-          await fetch('http://localhost:3000/api/oauth/token', {
+          const response = await fetch('/api/oauth/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ code, state })
           });
+          if (!response.ok) throw new Error('relay rejected');
+          document.getElementById('icon').textContent = '\u2705';
+          document.getElementById('title').textContent = '\u00a1Listo! Sesión iniciada.';
+          document.getElementById('msg').textContent = 'Procesando código de autorización...';
+          setTimeout(() => window.close && window.close(), 1500);
         } catch (e) {}
-        document.getElementById('icon').textContent = '\u2705';
-        document.getElementById('title').textContent = '\u00a1Listo! Sesión iniciada.';
-        document.getElementById('msg').textContent = 'Procesando código de autorización...';
-        setTimeout(() => window.close && window.close(), 1500);
-      } else if (queryParams.get('error')) {
-        document.getElementById('icon').textContent = '\u274c';
-        document.getElementById('title').textContent = 'Error de autenticación';
-        document.getElementById('msg').textContent = queryParams.get('error_description') || queryParams.get('error') || 'Acceso denegado.';
       } else {
         document.getElementById('icon').textContent = '\u274c';
         document.getElementById('title').textContent = 'Error de autenticación';
-        document.getElementById('msg').textContent = 'No se encontró el token. Intenta de nuevo.';
+        document.getElementById('msg').textContent = 'No se recibió un código válido.';
       }
     })();
   </script>
@@ -155,102 +268,60 @@ async function startServer() {
 </html>`);
   });
 
-  // Recibe el token o código desde la página de captura o desde Electron
-  app.post('/api/oauth/token', async (req, res) => {
-    const { token, code, state, codeVerifier } = req.body;
-
-    if (token) {
-      // Implicit flow: almacenar token para relay móvil
-      pendingOAuthToken = token;
-      pendingOAuthTimestamp = Date.now();
-      console.log('[OAuth/Relay] Token de Google Drive capturado exitosamente via relay.');
-      return res.json({ ok: true });
+  app.post('/api/oauth/prepare', (req, res) => {
+    const { state } = req.body;
+    const sessionId = (req as express.Request & { sessionId?: string }).sessionId;
+    if (!sessionId || !isValidString(state, 256) || !/^[A-Za-z0-9_-]{16,256}$/.test(state)) {
+      return res.status(400).json({ error: 'Estado OAuth inválido' });
     }
-
-    if (code) {
-      // Authorization Code Flow: intercambiar code por tokens
-      // Usa client_secret (del JSON) + code_verifier (recibido de Electron)
-      try {
-        const configRaw = await fs.readFile(
-          path.join(import.meta.dirname, 'firebase-applet-config.json'), 'utf8'
-        );
-        const config = JSON.parse(configRaw);
-        const clientId = config.oAuthClientId;
-        const clientSecret = config.oAuthClientSecret;
-
-        if (!clientId) {
-          console.error('[OAuth] oAuthClientId no encontrado en firebase-applet-config.json');
-          return res.status(500).json({ error: 'Falta oAuthClientId en firebase-applet-config.json. Contacta al desarrollador.' });
-        }
-
-        if (!clientSecret) {
-          console.error('[OAuth] oAuthClientSecret no encontrado en firebase-applet-config.json');
-          return res.status(500).json({ error: 'Falta oAuthClientSecret en firebase-applet-config.json.' });
-        }
-
-        const bodyParams: Record<string, string> = {
-          code,
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: 'http://localhost:3000/api/oauth/callback',
-          grant_type: 'authorization_code',
-        };
-
-        // Incluir code_verifier si se envió (PKCE desde Electron)
-        if (codeVerifier && typeof codeVerifier === 'string' && codeVerifier.length > 0) {
-          bodyParams.code_verifier = codeVerifier;
-          console.log('[OAuth] code_verifier presente, intercambiando con PKCE + client_secret');
-        } else {
-          console.log('[OAuth] Sin code_verifier, intercambiando solo con client_secret');
-        }
-
-        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams(bodyParams).toString(),
-        });
-
-        if (!tokenRes.ok) {
-          const errText = await tokenRes.text();
-          console.error('[OAuth] Google token exchange failed:', tokenRes.status, errText);
-          return res.status(502).json({ error: 'Token exchange failed', detail: errText });
-        }
-
-        const tokens = await tokenRes.json();
-        console.log('[OAuth] ✅ Tokens obtenidos (access_token + refresh_token)');
-        return res.json({
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token || null,
-        });
-      } catch (err) {
-        console.error('[OAuth] Error in token exchange:', err);
-        return res.status(500).json({ error: 'Internal server error' });
-      }
+    const now = Date.now();
+    for (const [key, transaction] of oauthTransactions) {
+      if (now - transaction.createdAt > OAUTH_TRANSACTION_TTL_MS) oauthTransactions.delete(key);
     }
-
-    res.status(400).json({ error: 'No token or code provided' });
+    oauthTransactions.set(state, { sessionId, createdAt: now });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true });
   });
 
-  // Permite que la app móvil consulte si ya hay un token disponible
-  app.get('/api/oauth/token', (_req, res) => {
-    const isValid = pendingOAuthToken && (Date.now() - pendingOAuthTimestamp) < 300_000;
-    if (isValid) {
-      const data = pendingOAuthToken!;
-      pendingOAuthToken = null; // Consumir (un solo uso)
-      // Si es un JSON con code, parsearlo y devolver code/state
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.code && parsed.state) {
-          res.json({ code: parsed.code, state: parsed.state });
-        } else {
-          res.json({ token: data });
-        }
-      } catch {
-        res.json({ token: data });
-      }
-    } else {
-      res.json({ token: null });
+  // Recibe sólo authorization codes. El intercambio PKCE ocurre en el cliente;
+  // nunca se aceptan access tokens ni se almacenan secretos en este relay.
+  app.post('/api/oauth/token', (req, res) => {
+    const { code, state, codeVerifier } = req.body;
+    const transaction = typeof state === 'string' ? oauthTransactions.get(state) : undefined;
+    const requestSessionId = getSessionId(req);
+    if (!isValidString(code, 4096) || !isValidString(state, 256) ||
+      !transaction ||
+      Date.now() - transaction.createdAt > OAUTH_TRANSACTION_TTL_MS ||
+      transaction.code) {
+      return res.status(400).json({ error: 'Estado OAuth inválido o sesión expirada' });
     }
+    if (codeVerifier !== undefined && !isValidString(codeVerifier, 256)) {
+      return res.status(400).json({ error: 'PKCE inválido' });
+    }
+    if (codeVerifier && requestSessionId !== transaction.sessionId) {
+      return res.status(401).json({ error: 'Sesión OAuth inválida' });
+    }
+    if (codeVerifier) {
+      oauthTransactions.delete(state);
+    } else {
+      transaction.code = code;
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true });
+  });
+
+  // La consulta también está vinculada a la sesión y consume el código una sola vez.
+  app.get('/api/oauth/token', (req, res) => {
+    const sessionId = (req as express.Request & { sessionId?: string }).sessionId;
+    const transaction = [...oauthTransactions.entries()]
+      .filter(([, value]) => value.sessionId === sessionId && value.code &&
+        Date.now() - value.createdAt <= OAUTH_TRANSACTION_TTL_MS)
+      .sort(([, a], [, b]) => b.createdAt - a.createdAt)[0];
+    res.setHeader('Cache-Control', 'no-store');
+    if (!transaction) return res.json({ code: null });
+    const [state, value] = transaction;
+    oauthTransactions.delete(state);
+    res.json({ code: value.code, state });
   });
 
   // --- API DE MOTOR DE SINCRONIZACIÓN EN SEGUNDO PLANO ---
@@ -485,15 +556,26 @@ async function startServer() {
     try {
       const targetPath = req.query.path as string;
       const { content, base64 } = req.body;
-      if (!targetPath) return res.status(400).json({ error: "path required" });
+      if (!isValidString(targetPath, 4096)) return res.status(400).json({ error: "path required" });
       if (!isPathAllowed(targetPath)) return res.status(403).json({ error: "path no permitido" });
+      if (typeof content !== 'string') return res.status(400).json({ error: "content debe ser un string" });
+      if (typeof base64 !== 'undefined' && typeof base64 !== 'boolean') {
+        return res.status(400).json({ error: "base64 inválido" });
+      }
 
-      const dataBuffer = base64 ? Buffer.from(content || '', 'base64') : Buffer.from(content || '', 'utf8');
+      const dataBuffer = base64 ? Buffer.from(content, 'base64') : Buffer.from(content, 'utf8');
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await fs.writeFile(targetPath, dataBuffer);
+      const temporaryPath = `${targetPath}.syncclient-tmp-${process.pid}-${Date.now()}`;
+      try {
+        await fs.writeFile(temporaryPath, dataBuffer, { flag: 'wx' });
+        await fs.rename(temporaryPath, targetPath);
+      } finally {
+        await fs.rm(temporaryPath, { force: true }).catch(() => { });
+      }
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const status = err.code === 'EACCES' || err.code === 'EPERM' ? 403 : 500;
+      res.status(status).json({ error: err.message });
     }
   });
 
@@ -596,8 +678,8 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, "127.0.0.1", () => {
+    console.log(`Server running on http://127.0.0.1:${PORT}`);
   });
 
   server.on('error', (err: any) => {

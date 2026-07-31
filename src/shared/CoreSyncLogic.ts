@@ -5,6 +5,8 @@
  * Principio DRY (Don't Repeat Yourself).
  */
 
+import { VectorClockManager, VectorClock } from './VectorClock';
+
 export interface NumberedFileInfo {
   isNumbered: boolean;
   baseName: string;
@@ -65,6 +67,14 @@ export interface SyncPlan {
     localVc: string;
     remoteVc: string;
   }>;
+}
+
+export interface SyncStateSnapshot {
+  localMtime: number;
+  remoteMtime: number;
+  remoteId: string;
+  fileSize: number | null;
+  vectorClock?: string | null;
 }
 
 export class CoreSyncLogic {
@@ -208,7 +218,7 @@ export class CoreSyncLogic {
   public static computeSyncPlan(
     localSnapshot: ReadonlyMap<string, { name: string; mtime: number; size: number }>,
     remoteSnapshot: ReadonlyMap<string, RemoteEntry>,
-    dbState: ReadonlyMap<string, { localMtime: number; remoteMtime: number; remoteId: string; fileSize: number }>,
+    dbState: ReadonlyMap<string, SyncStateSnapshot>,
     deviceId: string
   ): SyncPlan {
     const plan: SyncPlan = {
@@ -232,6 +242,10 @@ export class CoreSyncLogic {
     }
 
     const processedRemotes = new Set<string>();
+    const parseClock = (clock: string | null | undefined): VectorClock =>
+      VectorClockManager.fromString(clock || '{}');
+    const remoteClock = (entry: RemoteEntry, fallback: VectorClock): VectorClock =>
+      VectorClockManager.fromAppProperties(entry.appProperties || {}) || fallback;
 
     // Procesar archivos locales
     for (const [relPath, localEntry] of localSnapshot) {
@@ -257,6 +271,18 @@ export class CoreSyncLogic {
       const sizeChanged = dbEntry.fileSize !== null && localEntry.size !== dbEntry.fileSize;
 
       if (!mtimeChanged && !sizeChanged) {
+        // A remote-only change must not be hidden by the local snapshot loop.
+        if (remoteEntry) {
+          const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
+          if (Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000) {
+            const baseClock = parseClock(dbEntry.vectorClock);
+            plan.downloads.push({
+              remoteFile: remoteEntry,
+              localPath: relPath,
+              vectorClock: JSON.stringify(remoteClock(remoteEntry, baseClock))
+            });
+          }
+        }
         continue; // Sin cambios
       }
 
@@ -267,19 +293,22 @@ export class CoreSyncLogic {
 
         if (remoteChanged) {
           // Ambos cambiaron — conflicto legítimo
+          const baseClock = parseClock(dbEntry.vectorClock);
+          const localVc = VectorClockManager.increment(baseClock, deviceId);
           plan.conflicts.push({
             localPath: relPath,
             remoteFile: remoteEntry,
-            localVc: JSON.stringify({ [deviceId]: 1 }),
-            remoteVc: JSON.stringify({ remote: 1 })
+            localVc: JSON.stringify(localVc),
+            remoteVc: JSON.stringify(remoteClock(remoteEntry, baseClock))
           });
         } else {
           // Solo local cambió — upload
+          const localVc = VectorClockManager.increment(parseClock(dbEntry.vectorClock), deviceId);
           plan.uploads.push({
             localPath: relPath,
             remoteName: localEntry.name,
             remoteId: dbEntry.remoteId,
-            vectorClock: JSON.stringify({ [deviceId]: (JSON.parse(dbEntry.remoteId ? '{}' : '{"' + deviceId + '":0}')[deviceId] || 0) + 1 })
+            vectorClock: JSON.stringify(localVc)
           });
         }
       } else {
@@ -288,7 +317,7 @@ export class CoreSyncLogic {
           localPath: relPath,
           remoteName: localEntry.name,
           remoteId: dbEntry.remoteId,
-          vectorClock: JSON.stringify({ [deviceId]: 1 })
+          vectorClock: JSON.stringify(VectorClockManager.increment(parseClock(dbEntry.vectorClock), deviceId))
         });
       }
     }
@@ -302,12 +331,22 @@ export class CoreSyncLogic {
       const dbEntry = Array.from(dbState.entries()).find(([k, v]) => k.toLowerCase() === lowerName)?.[1];
 
       if (!localEntry) {
-        if (!dbEntry || dbEntry.remoteId !== remoteEntry.id) {
-          // Nuevo archivo remoto — descargar
+        const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
+        const remoteChanged = Boolean(dbEntry) &&
+          Number.isFinite(remoteMtime) &&
+          Math.abs(remoteMtime - dbEntry!.remoteMtime) > 3000;
+        const remoteSize = remoteEntry.size === undefined ? undefined : Number.parseInt(remoteEntry.size, 10);
+        const sizeChanged = Boolean(dbEntry) &&
+          remoteSize !== undefined &&
+          Number.isFinite(remoteSize) &&
+          remoteSize !== dbEntry!.fileSize;
+
+        if (!dbEntry || dbEntry.remoteId !== remoteEntry.id || remoteChanged || sizeChanged) {
+          // Archivo remoto nuevo o actualizado — descargar
           plan.downloads.push({
             remoteFile: remoteEntry,
             localPath: remoteEntry.name,
-            vectorClock: JSON.stringify({ remote: 1 })
+            vectorClock: JSON.stringify(remoteClock(remoteEntry, { remote: 1 }))
           });
         }
       }

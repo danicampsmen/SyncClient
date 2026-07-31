@@ -11,6 +11,8 @@ export interface IFileSystem {
   mkdir(path: string): Promise<void>;
   readFile(path: string, base64?: boolean): Promise<string>;
   writeFile(path: string, data: string | Uint8Array, base64?: boolean): Promise<void>;
+  appendFile(path: string, data: string | Uint8Array, base64?: boolean): Promise<void>;
+  readFileChunk?(path: string, offset: number, length: number): Promise<{ data: string; bytesRead: number }>;
   stat(path: string): Promise<FileEntry | null>;
   readdir(path: string): Promise<FileEntry[]>;
   rm(path: string): Promise<void>;
@@ -108,6 +110,24 @@ export class CapacitorFS implements IFileSystem {
         recursive: true
       });
     }
+  }
+
+  async appendFile(path: string, data: string | Uint8Array, base64 = false): Promise<void> {
+    const content = data instanceof Uint8Array
+      ? btoa(Array.from(data, byte => String.fromCharCode(byte)).join(''))
+      : data;
+    const options: any = {
+      path: this.isInternal(path) ? this.toInternalPath(path) : this.toExternalPath(path),
+      data: content,
+      directory: this.isInternal(path) ? Directory.Data : Directory.ExternalStorage,
+      encoding: base64 || data instanceof Uint8Array ? undefined : Encoding.UTF8
+    };
+    await Filesystem.appendFile(options);
+  }
+
+  async readFileChunk(path: string, offset: number, length: number): Promise<{ data: string; bytesRead: number }> {
+    const { StreamedFilesystem } = await import('./streamedFilesystem');
+    return StreamedFilesystem.readChunk({ path, offset, length });
   }
 
   async stat(path: string): Promise<FileEntry | null> {

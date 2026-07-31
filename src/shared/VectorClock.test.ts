@@ -117,5 +117,10 @@ describe('VectorClockManager', () => {
         test('fromString with invalid JSON returns empty', () => {
             expect(VectorClockManager.fromString('invalid')).toEqual({});
         });
+
+        test('rejects non-clock JSON values', () => {
+            expect(VectorClockManager.fromString('{"d1":"5"}')).toEqual({});
+            expect(VectorClockManager.fromString('[]')).toEqual({});
+        });
     });
 });

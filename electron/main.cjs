@@ -13,6 +13,7 @@ if (process.platform === 'linux') {
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+let activeOAuthPromise = null;
 
 // Manejador IPC para selector nativo de directorio en Linux/Desktop
 ipcMain.handle('select-directory', async () => {
@@ -46,20 +47,41 @@ function generateCodeChallenge(verifier) {
   return base64URLEncode(hash);
 }
 
+async function exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri) {
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code'
+    }).toString()
+  });
+  if (!response.ok) {
+    throw new Error(`Google rechazó el intercambio OAuth (${response.status})`);
+  }
+  const tokens = await response.json();
+  if (!tokens.access_token) throw new Error('Google no devolvió access_token');
+  return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || null };
+}
+
 // Manejador IPC para OAuth nativo de Google / Google Drive en Electron
 // Usa Authorization Code Flow con PKCE para obtener refresh_token
-ipcMain.handle('open-google-auth', async () => {
+async function openGoogleAuth() {
   console.log('[Electron] Iniciando ventana nativa de OAuth (PKCE Authorization Code Flow)...');
 
   const firebaseConfig = require(path.join(__dirname, '..', 'firebase-applet-config.json'));
-  const clientId = firebaseConfig.oAuthClientId || '123619653091-oodio89frb0ogcm89bc5btpigonl0r1a.apps.googleusercontent.com';
+  const clientId = firebaseConfig.oAuthClientId;
+  if (!clientId) throw new Error('Falta oAuthClientId en la configuración pública de Firebase');
   const redirectUri = 'http://localhost:3000/api/oauth/callback';
   const scope = 'https://www.googleapis.com/auth/drive profile email';
 
   // Generar PKCE
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
-  const state = codeVerifier.substring(0, 16);
+  const state = base64URLEncode(require('crypto').randomBytes(24));
 
   const authUrl =
     `https://accounts.google.com/o/oauth2/v2/auth` +
@@ -74,6 +96,7 @@ ipcMain.handle('open-google-auth', async () => {
     `&state=${encodeURIComponent(state)}`;
 
   return new Promise((resolve, reject) => {
+    const authSession = session.fromPartition(`auth-popup-session-${Date.now()}`, { cache: true });
     let authWindow = new BrowserWindow({
       width: 550,
       height: 700,
@@ -83,14 +106,13 @@ ipcMain.handle('open-google-auth', async () => {
         nodeIntegration: false,
         contextIsolation: true,
         userAgent: firefoxUserAgent,
+        session: authSession,
         preload: path.join(__dirname, 'preload.cjs'),
       }
     });
 
     authWindow.webContents.setUserAgent(firefoxUserAgent);
 
-    const authSession = session.fromPartition('auth-popup-session', { cache: true });
-    authWindow.webContents.session = authSession;
     authWindow.webContents.setUserAgent(firefoxUserAgent);
 
     authWindow.webContents.session.webRequest.onBeforeSendHeaders(
@@ -109,79 +131,85 @@ ipcMain.handle('open-google-auth', async () => {
 
     let codeReceived = false;
 
-    const handleUrl = async (url) => {
+    const handleUrl = async (url, navigationEvent) => {
       if (!url || codeReceived) return;
-      console.log('[Electron] authWindow navegando a URL:', url.substring(0, 120));
-
-      // Buscar ?code= o &code= en la URL de callback
-      const codeMatch = url.match(/[?&]code=([^&]+)/);
-      if (!codeMatch) {
-        // También detectar error de OAuth
-        if (url.includes('error=')) {
-          const errMatch = url.match(/[?&]error=([^&]+)/);
-          reject(new Error(`OAuth error: ${errMatch ? errMatch[1] : 'unknown'}`));
-          authWindow?.destroy();
-        }
+      let parsed;
+      try { parsed = new URL(url); } catch { return; }
+      const callbackOrigin = new URL(redirectUri);
+      if (parsed.origin !== callbackOrigin.origin || parsed.pathname !== callbackOrigin.pathname) return;
+      if (parsed.searchParams.get('state') !== state) {
+        navigationEvent?.preventDefault();
+        reject(new Error('OAuth state inválido'));
+        authWindow?.destroy();
         return;
       }
 
+      const code = parsed.searchParams.get('code');
+      if (!code) {
+        navigationEvent?.preventDefault();
+        reject(new Error('Google no devolvió un código OAuth'));
+        authWindow?.destroy();
+        return;
+      }
+
+      navigationEvent?.preventDefault();
       codeReceived = true;
-      const code = decodeURIComponent(codeMatch[1]);
-      console.log('[Electron] Authorization code recibido. Delegando intercambio al backend (client_secret + code_verifier)...');
+      console.log('[Electron] Authorization code recibido; validando state/sesión local...');
 
-      // Delegar siempre al backend, que tiene client_secret y recibe code_verifier
       try {
-        const backendRes = await fetch('http://localhost:3000/api/oauth/token', {
+        const relayResult = await authWindow.webContents.executeJavaScript(`fetch('/api/oauth/token', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, codeVerifier })
+          body: JSON.stringify({
+            code: ${JSON.stringify(code)},
+            state: ${JSON.stringify(state)},
+            codeVerifier: ${JSON.stringify(codeVerifier)}
+          })
+        }).then(async response => ({ ok: response.ok, status: response.status }))`, true);
+        if (!relayResult?.ok) {
+          throw new Error(`El relay rechazó la sesión OAuth (${relayResult?.status || 'sin respuesta'})`);
+        }
+        const tokens = await exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri);
+        if (!tokens?.accessToken) throw new Error('Google no devolvió un token válido');
+        const driveResponse = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` }
         });
-
-        if (!backendRes.ok) {
-          const errText = await backendRes.text();
-          console.error('[Electron] Backend token exchange failed:', backendRes.status, errText);
-          reject(new Error(`Error del servidor: ${backendRes.status} - ${errText}`));
-          authWindow?.destroy();
-          return;
+        if (!driveResponse.ok) {
+          throw new Error(`Google Drive rechazó el token (${driveResponse.status})`);
         }
-
-        const data = await backendRes.json();
-
-        if (data.error) {
-          console.error('[Electron] Error del backend:', data.error, data.detail || '');
-          reject(new Error(data.error + (data.detail ? ': ' + data.detail : '')));
-          authWindow?.destroy();
-          return;
-        }
-
-        if (!data.accessToken) {
-          console.error('[Electron] Backend no devolvió accessToken');
-          reject(new Error('El backend no devolvió accessToken.'));
-          authWindow?.destroy();
-          return;
-        }
-
-        console.log('[Electron] ✅ Tokens obtenidos con éxito! access_token + refresh_token');
-        resolve({
-          accessToken: data.accessToken,
-          refreshToken: data.refreshToken || null
-        });
-
+        resolve(tokens);
         setTimeout(() => {
-          if (authWindow && !authWindow.isDestroyed()) {
-            authWindow.destroy();
-          }
+          if (authWindow && !authWindow.isDestroyed()) authWindow.destroy();
         }, 150);
       } catch (e) {
-        console.error('[Electron] Error en token exchange:', e);
+        console.error('[Electron] Error en OAuth:', e?.message || e);
         reject(e);
         authWindow?.destroy();
       }
     };
 
-    authWindow.webContents.on('will-navigate', (_event, url) => handleUrl(url));
+    authWindow.webContents.on('will-navigate', (event, url) => handleUrl(url, event));
     authWindow.webContents.on('did-navigate', (_event, url) => handleUrl(url));
-    authWindow.webContents.on('did-redirect-navigation', (_event, url) => handleUrl(url));
+    authWindow.webContents.on('did-redirect-navigation', (event, url) => handleUrl(url, event));
+
+    // Crear la sesión/cookie y registrar el state antes de abrir Google.
+    void (async () => {
+      try {
+        await authWindow.loadURL('http://localhost:3000/api/session/bootstrap');
+        const prepared = await authWindow.webContents.executeJavaScript(`fetch('/api/oauth/prepare', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: ${JSON.stringify(state)} })
+        }).then(async response => ({ ok: response.ok, data: await response.json() }))`, true);
+        if (!prepared?.ok) throw new Error('No se pudo preparar la sesión OAuth');
+        await authWindow.loadURL(authUrl);
+      } catch (error) {
+        if (!codeReceived) reject(error);
+        authWindow?.destroy();
+      }
+    })();
 
     authWindow.on('closed', () => {
       if (!codeReceived) {
@@ -190,8 +218,17 @@ ipcMain.handle('open-google-auth', async () => {
       authWindow = null;
     });
 
-    authWindow.loadURL(authUrl);
   });
+}
+
+ipcMain.handle('open-google-auth', async () => {
+  if (activeOAuthPromise) return activeOAuthPromise;
+  activeOAuthPromise = openGoogleAuth();
+  try {
+    return await activeOAuthPromise;
+  } finally {
+    activeOAuthPromise = null;
+  }
 });
 
 ipcMain.handle('open-external', async (_event, url) => {

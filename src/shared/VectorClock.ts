@@ -11,6 +11,13 @@ export interface VectorClock {
 }
 
 export class VectorClockManager {
+    private static isClock(value: unknown): value is VectorClock {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        return Object.entries(value as Record<string, unknown>).every(([deviceId, count]) =>
+            deviceId.length > 0 && typeof count === 'number' && Number.isFinite(count) && count >= 0
+        );
+    }
+
     /**
      * Compara dos vector clocks.
      * @returns 'a_newer' si A es estrictamente más nuevo,
@@ -97,7 +104,8 @@ export class VectorClockManager {
         // Intentar clave simple
         if (props.syncclient_vc) {
             try {
-                return JSON.parse(props.syncclient_vc);
+                const parsed = JSON.parse(props.syncclient_vc);
+                if (VectorClockManager.isClock(parsed)) return parsed;
             } catch { /* corrupto, intentar chunks */ }
         }
 
@@ -110,7 +118,8 @@ export class VectorClockManager {
         }
         if (chunks.length > 0) {
             try {
-                return JSON.parse(chunks.join(''));
+                const parsed = JSON.parse(chunks.join(''));
+                if (VectorClockManager.isClock(parsed)) return parsed;
             } catch { /* corrupto */ }
         }
 
@@ -139,7 +148,9 @@ export class VectorClockManager {
         if (dbVectorClock) {
             try {
                 const clock = JSON.parse(dbVectorClock);
-                return { clock, needsDriveSync: true }; // re-escribir en Drive
+                if (VectorClockManager.isClock(clock)) {
+                    return { clock, needsDriveSync: true }; // re-escribir en Drive
+                }
             } catch { /* corrupto */ }
         }
 
@@ -162,7 +173,8 @@ export class VectorClockManager {
      */
     static fromString(str: string): VectorClock {
         try {
-            return JSON.parse(str);
+            const clock = JSON.parse(str);
+            return VectorClockManager.isClock(clock) ? clock : {};
         } catch {
             return {};
         }

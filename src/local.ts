@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { backendFetch } from './services/backendSession';
 
 export interface LocalFile {
   id: string;
@@ -23,7 +24,7 @@ export const listLocalFiles = async (path: string): Promise<LocalFile[]> => {
     }
   }
 
-  const res = await fetch(`/api/local/files?path=${encodeURIComponent(path)}`);
+  const res = await backendFetch(`/api/local/files?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   return data.files;
@@ -35,7 +36,7 @@ export const getLocalFileContent = async (path: string, asBase64 = false): Promi
     return res.data as string;
   }
 
-  const res = await fetch(`/api/local/content?path=${encodeURIComponent(path)}${asBase64 ? '&base64=true' : ''}`);
+  const res = await backendFetch(`/api/local/content?path=${encodeURIComponent(path)}${asBase64 ? '&base64=true' : ''}`);
   if (!res.ok) throw new Error(await res.text());
   if (asBase64) {
     const data = await res.json();
@@ -50,7 +51,7 @@ export const writeLocalFileContent = async (path: string, content: string, isBas
     return;
   }
 
-  const res = await fetch(`/api/local/content?path=${encodeURIComponent(path)}`, {
+  const res = await backendFetch(`/api/local/content?path=${encodeURIComponent(path)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, base64: isBase64 })
@@ -64,7 +65,7 @@ export const createLocalDir = async (path: string): Promise<void> => {
     return;
   }
 
-  const res = await fetch(`/api/local/dir?path=${encodeURIComponent(path)}`, {
+  const res = await backendFetch(`/api/local/dir?path=${encodeURIComponent(path)}`, {
     method: 'POST'
   });
   if (!res.ok) throw new Error(await res.text());
@@ -81,7 +82,7 @@ export const deleteLocalFile = async (path: string): Promise<void> => {
     return;
   }
 
-  const res = await fetch(`/api/local/files?path=${encodeURIComponent(path)}`, {
+  const res = await backendFetch(`/api/local/files?path=${encodeURIComponent(path)}`, {
     method: 'DELETE'
   });
   if (!res.ok) throw new Error(await res.text());

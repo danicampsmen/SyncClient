@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { SyncEngine } from './SyncEngine';
 import { CapacitorFS } from '../utils/fileSystem';
 import { SyncPair, SyncSettings } from '../types';
+import { backendFetch } from './backendSession';
 
 class SyncService {
   private localEngine: SyncEngine | null = null;
@@ -18,7 +19,7 @@ class SyncService {
     if (this.isNative) {
       this.localEngine?.setToken(token);
     } else {
-      await fetch('/api/sync/token', {
+      await backendFetch('/api/sync/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
@@ -30,7 +31,7 @@ class SyncService {
     if (this.isNative) {
       return this.localEngine?.getStatus();
     } else {
-      const res = await fetch('/api/sync/status');
+      const res = await backendFetch('/api/sync/status');
       if (res.ok) return await res.json();
       throw new Error('Failed to fetch status from backend');
     }
@@ -40,7 +41,7 @@ class SyncService {
     if (this.isNative) {
       await this.localEngine?.setPairs(pairs);
     } else {
-      await fetch('/api/sync/pairs', {
+      await backendFetch('/api/sync/pairs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairs })
@@ -52,7 +53,7 @@ class SyncService {
     if (this.isNative) {
       await this.localEngine?.togglePairSync(pairId);
     } else {
-      await fetch('/api/sync/toggle', {
+      await backendFetch('/api/sync/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
@@ -64,7 +65,7 @@ class SyncService {
     if (this.isNative) {
       await this.localEngine?.forceSync(pairId);
     } else {
-      await fetch('/api/sync/force', {
+      await backendFetch('/api/sync/force', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
@@ -77,7 +78,7 @@ class SyncService {
       return (await this.localEngine?.cleanDuplicates(pairId)) || null;
     } else {
       try {
-        const res = await fetch('/api/sync/clean-duplicates', {
+        const res = await backendFetch('/api/sync/clean-duplicates', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pairId })
@@ -97,7 +98,7 @@ class SyncService {
     if (this.isNative) {
       await this.localEngine?.pausePair(pairId);
     } else {
-      await fetch('/api/sync/pause', {
+      await backendFetch('/api/sync/pause', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
@@ -109,7 +110,7 @@ class SyncService {
     if (this.isNative) {
       await this.localEngine?.removePair(id);
     } else {
-      await fetch(`/api/sync/pair?id=${encodeURIComponent(id)}`, {
+      await backendFetch(`/api/sync/pair?id=${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
     }
@@ -119,7 +120,7 @@ class SyncService {
     if (this.isNative) {
       await this.localEngine?.updateSettings(settings);
     } else {
-      await fetch('/api/sync/settings', {
+      await backendFetch('/api/sync/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings })
@@ -131,7 +132,7 @@ class SyncService {
     if (this.isNative) {
       console.warn('[SyncService] dismissAlert no implementado en nativo');
     } else {
-      await fetch('/api/sync/dismiss-alert', {
+      await backendFetch('/api/sync/dismiss-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ drivePath })
@@ -148,7 +149,7 @@ class SyncService {
         return null;
       }
       // Usar el backend HTTP como proxy para resolver el conflicto (el PC tiene acceso a Drive)
-      return await fetch('/api/sync/resolve-conflict', {
+      return await backendFetch('/api/sync/resolve-conflict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conflictId, resolution })
@@ -157,7 +158,7 @@ class SyncService {
         return null;
       });
     } else {
-      await fetch('/api/sync/resolve-conflict', {
+      await backendFetch('/api/sync/resolve-conflict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conflictId, resolution })
@@ -169,7 +170,7 @@ class SyncService {
     if (this.isNative) {
       // Fix #5: Delegar al backend del PC para deshidratar (liberar espacio)
       console.log('[SyncService] Delegando dehydrate al PC...');
-      return await fetch('/api/sync/dehydrate', {
+      return await backendFetch('/api/sync/dehydrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
@@ -178,7 +179,7 @@ class SyncService {
         return null;
       });
     } else {
-      await fetch('/api/sync/dehydrate', {
+      await backendFetch('/api/sync/dehydrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
@@ -190,7 +191,7 @@ class SyncService {
     if (this.isNative) {
       // Fix #5: Delegar al backend del PC para hidratar (descargar offline)
       console.log('[SyncService] Delegando hydrate al PC...');
-      return await fetch('/api/sync/hydrate', {
+      return await backendFetch('/api/sync/hydrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
@@ -199,7 +200,7 @@ class SyncService {
         return null;
       });
     } else {
-      await fetch('/api/sync/hydrate', {
+      await backendFetch('/api/sync/hydrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })

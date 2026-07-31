@@ -7,12 +7,13 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "npm run build && electron . --no-sandbox",
+    "start": "npm run build && bash scripts/start-electron.sh",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on tcp:3000 && electron . --no-sandbox\"",
     "electron:build": "npm run build && electron-builder",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
     "android:build": "npm run build && npx cap copy android",
     "android:open": "npx cap copy android && CAPACITOR_ANDROID_STUDIO_PATH=/opt/android-studio/bin/studio.sh npx cap open android",
     "android:deploy": "npm run android:build && cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew installDebug && cd .. && adb reverse tcp:3000 tcp:3000 && adb shell monkey -p com.syncclient.app -c android.intent.category.LAUNCHER 1"

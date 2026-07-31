@@ -93,4 +93,6 @@ export interface DeviceInfo {
 }
 
 /** Feature flag para activar/desactivar la nueva implementación */
-export const USE_V2_SYNC = process.env.SYNCCLIENT_V2 === 'true' || (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV);
+export const USE_V2_SYNC =
+    (typeof process !== 'undefined' && process.env?.SYNCCLIENT_V2 === 'true') ||
+    (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
