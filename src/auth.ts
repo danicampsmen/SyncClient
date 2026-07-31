@@ -134,6 +134,11 @@ export const refreshAccessToken = async (): Promise<string | null> => {
       } else {
         const errData = await res.json().catch(() => ({}));
         console.error('[Auth] Error renovando token vía OAuth2:', errData);
+        if (errData.error === 'invalid_grant') {
+          console.error('[Auth] Refresh token revocado o expirado. Se requiere re-autenticación completa.');
+          clearTokens();
+          return null;
+        }
         cachedRefreshToken = null;
         localStorage.removeItem('gdrive_refresh_token');
       }
@@ -240,6 +245,9 @@ const buildMobileOAuthUrl = async (): Promise<string> => {
 
   const redirectUri = 'http://localhost:3000/api/oauth/callback';
   const scope = encodeURIComponent('https://www.googleapis.com/auth/drive profile email');
+  // P3: Si NO tenemos refresh_token, forzar solo "consent" para que Google lo emita.
+  // Si YA tenemos refresh_token, usar "select_account consent" para permitir cambiar cuenta.
+  const promptValue = cachedRefreshToken ? 'select_account%20consent' : 'consent';
   return (
     `https://accounts.google.com/o/oauth2/v2/auth` +
     `?client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
@@ -247,7 +255,7 @@ const buildMobileOAuthUrl = async (): Promise<string> => {
     `&response_type=code` +
     `&scope=${scope}` +
     `&access_type=offline` +
-    `&prompt=select_account%20consent` +
+    `&prompt=${promptValue}` +
     `&state=${state}` +
     `&code_challenge=${challenge}` +
     `&code_challenge_method=S256`

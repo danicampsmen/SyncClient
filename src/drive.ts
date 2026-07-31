@@ -12,32 +12,34 @@ export interface DriveFile {
 // En su lugar, intentar renovar el token una vez antes de declarar la sesión expirada.
 let isRefreshing = false;
 
-const handleResponse = async (res: Response, retryFn?: () => Promise<Response>): Promise<Response> => {
+const handleResponse = async (res: Response, retryFactory?: (token: string) => Promise<Response>): Promise<Response> => {
   if (!res.ok) {
     if (res.status === 401) {
       // Fix C: Intentar renovar el token una vez antes de fallar
-      if (retryFn && !isRefreshing) {
+      if (retryFactory && !isRefreshing) {
         isRefreshing = true;
         console.log('[Drive API] 401 recibido. Intentando renovar token antes de fallar...');
         const refreshed = await refreshAccessToken();
         isRefreshing = false;
         if (refreshed) {
-          // Reintentar la llamada original con el token renovado
-          const retryRes = await retryFn();
-          if (retryRes.ok) return retryRes;
-          if (retryRes.status === 401) {
-            // La renovación no funcionó — sesión realmente expirada
-            localStorage.removeItem('gdrive_access_token');
-            localStorage.removeItem('gdrive_token_expiry');
-            throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
+          // Fix P1: Re-obtener token fresco y pasarlo a la factory (no usar el token del closure)
+          const freshToken = await getAccessToken();
+          if (freshToken) {
+            const retryRes = await retryFactory(freshToken);
+            if (retryRes.ok) return retryRes;
+            if (retryRes.status === 401) {
+              // La renovación no funcionó — sesión realmente expirada
+              localStorage.removeItem('gdrive_access_token');
+              localStorage.removeItem('gdrive_token_expiry');
+              throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
+            }
+            const errorText = await retryRes.text();
+            throw new Error(`Drive API error (${retryRes.status}): ${errorText}`);
           }
-          const errorText = await retryRes.text();
-          throw new Error(`Drive API error (${retryRes.status}): ${errorText}`);
-        } else {
-          localStorage.removeItem('gdrive_access_token');
-          localStorage.removeItem('gdrive_token_expiry');
-          throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
         }
+        localStorage.removeItem('gdrive_access_token');
+        localStorage.removeItem('gdrive_token_expiry');
+        throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
       }
       localStorage.removeItem('gdrive_access_token');
       localStorage.removeItem('gdrive_token_expiry');
@@ -68,11 +70,11 @@ export const listFiles = async (folderId = 'root'): Promise<DriveFile[]> => {
     url.searchParams.append('pageSize', '1000');
     if (pageToken) url.searchParams.append('pageToken', pageToken);
 
-    const doFetch = () => fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
+    const doFetch = (t: string) => fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${t}` },
     });
 
-    const res = await doFetch();
+    const res = await doFetch(token);
     await handleResponse(res, doFetch);
     const data = await res.json();
     if (data.files) allFiles.push(...data.files);
@@ -99,11 +101,11 @@ export const listFolders = async (parentFolderId = 'root'): Promise<DriveFile[]>
     url.searchParams.append('pageSize', '1000');
     if (pageToken) url.searchParams.append('pageToken', pageToken);
 
-    const doFetch = () => fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
+    const doFetch = (t: string) => fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${t}` },
     });
 
-    const res = await doFetch();
+    const res = await doFetch(token);
     await handleResponse(res, doFetch);
     const data = await res.json();
     if (data.files) allFolders.push(...data.files);
@@ -117,11 +119,11 @@ export const getFileContent = async (fileId: string, asBlob = false): Promise<st
   const token = await getAccessToken();
   if (!token) throw new Error('Not authenticated');
 
-  const doFetch = () => fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const doFetch = (t: string) => fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${t}` },
   });
 
-  const res = await doFetch();
+  const res = await doFetch(token);
   await handleResponse(res, doFetch);
   if (asBlob) {
     return await res.blob();
@@ -200,13 +202,13 @@ export const uploadFile = async (folderId: string, name: string, content: string
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', fileBlob, name);
 
-  const doFetch = () => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime', {
+  const doFetch = (t: string) => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${t}` },
     body: form,
   });
 
-  const res = await doFetch();
+  const res = await doFetch(token);
   await handleResponse(res, doFetch);
   return await res.json();
 };
@@ -216,12 +218,12 @@ export const deleteFile = async (fileId: string): Promise<void> => {
   const token = await getAccessToken();
   if (!token) throw new Error('Not authenticated');
 
-  const doFetch = () => fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+  const doFetch = (t: string) => fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${t}` },
   });
 
-  const res = await doFetch();
+  const res = await doFetch(token);
   await handleResponse(res, doFetch);
 };
 
@@ -235,16 +237,16 @@ export const createFolder = async (folderId: string, name: string): Promise<Driv
     parents: [folderId],
   };
 
-  const doFetch = () => fetch('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime', {
+  const doFetch = (t: string) => fetch('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${t}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(metadata),
   });
 
-  const res = await doFetch();
+  const res = await doFetch(token);
   await handleResponse(res, doFetch);
   return await res.json();
 };

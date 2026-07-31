@@ -59,10 +59,14 @@ class SyncEngine {
   private manifests: Record<string, Record<string, ManifestEntry>> = {};
   private pendingConflicts: PendingConflict[] = [];
   private accessToken: string | null = null;
+  private refreshToken: string | null = null;
+  private googleClientId: string = process.env.GOOGLE_CLIENT_ID || '';
   private configDir = path.join(os.homedir(), '.config', 'syncclient');
   private configFile = path.join(this.configDir, 'sync_data.json');
 
   private watchers: Record<string, FSWatcher> = {};
+  private watcherRetryCount: Record<string, number> = {};
+  private readonly watcherMaxRetries = 5;
   private activeSyncs = new Set<string>();
   private pendingSyncs = new Set<string>();
   private debounceTimers: Record<string, NodeJS.Timeout> = {};
@@ -294,15 +298,59 @@ class SyncEngine {
     }
   }
 
-  public setToken(token: string | null) {
+  public setToken(accessToken: string | null, refreshToken?: string | null) {
     const prev = this.accessToken;
-    this.accessToken = token;
-    if (token && prev !== token) {
-      console.log('[SyncEngine] Google Drive Access Token updated in backend.');
+    this.accessToken = accessToken;
+    if (refreshToken) this.refreshToken = refreshToken;
+    if (accessToken && prev !== accessToken) {
+      console.log('[SyncEngine] Google Drive Access Token updated in backend.' + (refreshToken ? ' Refresh token también recibido.' : ''));
       this.pairs.forEach(p => {
         if (p.status === 'unauthenticated') p.status = 'idle';
       });
       this.triggerAllActive();
+    }
+  }
+
+  /**
+   * Renueva el Google Access Token autónomamente usando refresh_token.
+   * Permite que el backend Desktop siga funcionando aunque el frontend no propague el nuevo token.
+   */
+  private async refreshAccessToken(): Promise<boolean> {
+    if (!this.refreshToken) {
+      console.warn('[SyncEngine] No hay refresh_token disponible. No se puede renovar automáticamente.');
+      return false;
+    }
+    try {
+      console.log('[SyncEngine] Intentando renovar Google Access Token autónomamente...');
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: this.googleClientId || '',
+          refresh_token: this.refreshToken,
+          grant_type: 'refresh_token',
+        }).toString(),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error('[SyncEngine] Error renovando token:', errData);
+        if (errData.error === 'invalid_grant') {
+          console.error('[SyncEngine] Refresh token revocado. Se requiere re-autenticación.');
+          this.refreshToken = null;
+        }
+        return false;
+      }
+      const data = await res.json();
+      if (data.access_token) {
+        this.accessToken = data.access_token;
+        if (data.refresh_token) this.refreshToken = data.refresh_token;
+        console.log('[SyncEngine] ✅ Google Access Token renovado exitosamente por el backend.');
+        return true;
+      }
+      return false;
+    } catch (e: any) {
+      console.error('[SyncEngine] Error de red renovando token:', e?.message || e);
+      return false;
     }
   }
 
@@ -632,7 +680,33 @@ class SyncEngine {
             }, 3000);
           });
 
+          watcher.on('error', (error) => {
+            console.error(`[SyncEngine/Chokidar] Error en watcher para ${pair.localPath}:`, error);
+            if (this.watchers[pair.id]) {
+              this.watchers[pair.id].close().catch(() => { });
+              delete this.watchers[pair.id];
+            }
+            const retries = (this.watcherRetryCount[pair.id] || 0) + 1;
+            this.watcherRetryCount[pair.id] = retries;
+            if (retries <= this.watcherMaxRetries) {
+              const delay = Math.min(60000, 5000 * (2 ** (retries - 1)));
+              console.log(`[SyncEngine/Chokidar] Reintentando watcher en ${delay / 1000}s (intento ${retries}/${this.watcherMaxRetries})...`);
+              setTimeout(() => this.refreshWatchers(), delay);
+            } else {
+              console.error(`[SyncEngine/Chokidar] Máximo de reintentos alcanzado para ${pair.localPath}. Watcher no se reestablecerá.`);
+              this.addEvent({
+                id: Math.random().toString(36).substr(2, 9),
+                pairId: pair.id,
+                filename: pair.localPath,
+                action: 'info',
+                timestamp: Date.now(),
+                details: 'Watcher de archivos falló permanentemente. La sincronización en tiempo real no está activa. Reinicia la app.'
+              }, true);
+            }
+          });
+
           this.watchers[pair.id] = watcher;
+          this.watcherRetryCount[pair.id] = 0;
         } catch (err) {
           console.error(`[SyncEngine/Chokidar] Error watching ${pair.localPath}:`, err);
         }
@@ -1799,7 +1873,11 @@ class SyncEngine {
   private async handleDriveResponse(res: Response): Promise<Response> {
     if (!res.ok) {
       if (res.status === 401) {
-        console.warn('[SyncEngine] Token de Google Drive expirado o inválido (401).');
+        console.warn('[SyncEngine] Token de Google Drive expirado o inválido (401). Intentando renovar autónomamente...');
+        const refreshed = await this.refreshAccessToken();
+        if (refreshed) {
+          throw new Error('TOKEN_REFRESHED_RETRY');
+        }
         this.accessToken = null;
         throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
       }

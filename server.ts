@@ -326,16 +326,22 @@ async function startServer() {
 
   // --- API DE MOTOR DE SINCRONIZACIÓN EN SEGUNDO PLANO ---
 
+  // P13: Health check endpoint para monitoreo de disponibilidad del backend
+  app.get("/api/health", (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ status: 'ok', timestamp: Date.now() });
+  });
+
   app.get("/api/sync/status", (req, res) => {
     res.json(syncEngine.getStatus());
   });
 
   app.post("/api/sync/token", (req, res) => {
-    const { token } = req.body;
+    const { token, refreshToken } = req.body;
     if (token !== null && !isValidString(token, 8192)) {
       return res.status(400).json({ error: "token inválido" });
     }
-    syncEngine.setToken(token as string | null);
+    syncEngine.setToken(token as string | null, (refreshToken || undefined) as string | undefined);
     res.json({ success: true });
   });
 

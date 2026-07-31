@@ -122,7 +122,32 @@ export class SQLiteBackend implements IStorageBackend {
             fsMod.mkdirSync(path.dirname(this.dbPath), { recursive: true });
         } catch { }
 
-        this.db = new Database(this.dbPath);
+        // DB1: Manejo de corrupción SQLite — intentar restaurar desde backup
+        try {
+            this.db = new Database(this.dbPath);
+        } catch (e: any) {
+            if (e.message?.includes('SQLITE_CORRUPT') || e.message?.includes('file is not a database')) {
+                console.warn('[SQLiteBackend] DB corrupta, intentando restaurar desde backup...');
+                try {
+                    const backupPath = this.dbPath + '.backup';
+                    if (fsMod.existsSync(backupPath)) {
+                        fsMod.copyFileSync(backupPath, this.dbPath);
+                        this.db = new Database(this.dbPath);
+                        console.log('[SQLiteBackend] DB restaurada desde backup exitosamente.');
+                    } else {
+                        console.warn('[SQLiteBackend] No hay backup disponible, creando DB nueva...');
+                        try { fsMod.unlinkSync(this.dbPath); } catch { }
+                        this.db = new Database(this.dbPath);
+                    }
+                } catch (restoreError: any) {
+                    console.warn('[SQLiteBackend] No se pudo restaurar, creando DB nueva...');
+                    try { fsMod.unlinkSync(this.dbPath); } catch { }
+                    this.db = new Database(this.dbPath);
+                }
+            } else {
+                throw e;
+            }
+        }
         this.db.pragma('journal_mode = WAL');
         this.db.pragma('busy_timeout = 5000');
         this.db.pragma('synchronous = NORMAL');
