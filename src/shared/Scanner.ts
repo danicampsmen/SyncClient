@@ -130,11 +130,76 @@ export async function scanChanges(
     fs: any,
     pairId: string
 ): Promise<ScanResult | 'PERMISSION_DENIED'> {
-    let entries: { name: string; isDirectory: boolean; size: number; mtime: number }[];
+    // Recopilar entradas del filesystem de forma compatible con Node.js y Capacitor
+    interface ScanEntry {
+        name: string;
+        isDirectory: boolean;
+        size: number;
+        mtime: number;
+    }
+
+    let entries: ScanEntry[] = [];
 
     try {
-        const raw = await fs.readdir(dir);
-        entries = Array.isArray(raw) ? raw : [];
+        // Intentar con withFileTypes (Node.js) — devuelve Dirent[]
+        let raw: any[];
+        try {
+            raw = await fs.readdir(dir, { withFileTypes: true });
+        } catch {
+            // Fallback: readdir sin opciones (devuelve string[] en Node.js o objetos en Capacitor)
+            raw = await fs.readdir(dir);
+        }
+
+        if (!Array.isArray(raw)) {
+            entries = [];
+        } else {
+            // Normalizar entradas a formato común
+            for (const item of raw) {
+                if (typeof item === 'string') {
+                    // Node.js readdir sin withFileTypes: string[]
+                    try {
+                        const fullPath = `${dir}/${item}`;
+                        const stat = await fs.stat(fullPath);
+                        entries.push({
+                            name: item,
+                            isDirectory: stat.isDirectory(),
+                            size: stat.size || 0,
+                            mtime: stat.mtimeMs || stat.mtime?.getTime?.() || 0
+                        });
+                    } catch {
+                        // No se pudo hacer stat — ignorar
+                    }
+                } else if (item && typeof item === 'object') {
+                    // Dirent (Node.js con withFileTypes) o entrada de Capacitor
+                    const name = item.name;
+                    if (!name) continue;
+
+                    // Si ya tiene size y mtime (Capacitor), usarlos directamente
+                    if (item.size !== undefined && item.mtime !== undefined) {
+                        entries.push({
+                            name,
+                            isDirectory: item.isDirectory === true || (typeof item.isDirectory === 'function' && item.isDirectory()),
+                            size: item.size || 0,
+                            mtime: item.mtime || 0
+                        });
+                    } else {
+                        // Dirent de Node.js: necesita stat para size/mtime
+                        try {
+                            const fullPath = `${dir}/${name}`;
+                            const stat = await fs.stat(fullPath);
+                            entries.push({
+                                name,
+                                isDirectory: typeof item.isDirectory === 'function' ? item.isDirectory() : item.isDirectory === true,
+                                size: stat.size || 0,
+                                mtime: stat.mtimeMs || 0
+                            });
+                        } catch {
+                            // No se pudo hacer stat — ignorar
+                        }
+                    }
+                }
+            }
+        }
     } catch {
         entries = [];
     }
