@@ -1,0 +1,21 @@
+# Dependencias (Gigantesco)
+node_modules/
+
+# Archivos de compilación y binarios
+dist/
+release/
+android/
+*.apk
+*.AppImage
+*.deb
+
+# Lockfiles (Gastan miles de tokens en texto inútil)
+package-lock.json
+bun.lock
+
+# Archivos temporales y cachés
+package.json.tmp
+.aider*
+.idea/
+.kilo/
+assets/

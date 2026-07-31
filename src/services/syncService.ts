@@ -129,7 +129,7 @@ class SyncService {
 
   public async dismissAlert(drivePath: string) {
     if (this.isNative) {
-      // Not implemented for native yet
+      console.warn('[SyncService] dismissAlert no implementado en nativo');
     } else {
       await fetch('/api/sync/dismiss-alert', {
         method: 'POST',
@@ -140,20 +140,43 @@ class SyncService {
   }
 
   public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename') {
-     if (this.isNative) {
-         // Not implemented for native yet
-     } else {
-         await fetch('/api/sync/resolve-conflict', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ conflictId, resolution })
-         });
-     }
+    if (this.isNative) {
+      // Fix #5: Implementar resolución de conflictos en nativo
+      const conflict = this.localEngine?.getStatus().pendingConflicts?.find((c: any) => c.id === conflictId);
+      if (!conflict) {
+        console.warn('[SyncService] Conflicto no encontrado:', conflictId);
+        return null;
+      }
+      // Usar el backend HTTP como proxy para resolver el conflicto (el PC tiene acceso a Drive)
+      return await fetch('/api/sync/resolve-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conflictId, resolution })
+      }).then(r => r.json()).catch(err => {
+        console.error('[SyncService] Error resolviendo conflicto en PC:', err);
+        return null;
+      });
+    } else {
+      await fetch('/api/sync/resolve-conflict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conflictId, resolution })
+      });
+    }
   }
 
   public async dehydrate(pairId: string) {
     if (this.isNative) {
-      // Not implemented for native yet
+      // Fix #5: Delegar al backend del PC para deshidratar (liberar espacio)
+      console.log('[SyncService] Delegando dehydrate al PC...');
+      return await fetch('/api/sync/dehydrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairId })
+      }).then(r => r.json()).catch(err => {
+        console.error('[SyncService] Error delegando dehydrate:', err);
+        return null;
+      });
     } else {
       await fetch('/api/sync/dehydrate', {
         method: 'POST',
@@ -165,7 +188,16 @@ class SyncService {
 
   public async hydrate(pairId: string) {
     if (this.isNative) {
-      // Not implemented for native yet
+      // Fix #5: Delegar al backend del PC para hidratar (descargar offline)
+      console.log('[SyncService] Delegando hydrate al PC...');
+      return await fetch('/api/sync/hydrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairId })
+      }).then(r => r.json()).catch(err => {
+        console.error('[SyncService] Error delegando hydrate:', err);
+        return null;
+      });
     } else {
       await fetch('/api/sync/hydrate', {
         method: 'POST',

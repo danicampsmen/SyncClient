@@ -32,6 +32,8 @@ export default function SyncApp() {
   const [needsAuth, setNeedsAuth] = useState(true);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const isLoggingInRef = useRef(false); // Guarda síncrona para prevenir doble submit
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [externalDrives, setExternalDrives] = useState<ExternalDriveAlert[]>([]);
   const [powerSavingMode, setPowerSavingMode] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<string>('default');
@@ -64,7 +66,7 @@ export default function SyncApp() {
       await fetchBackendStatus();
       if (isCancelled) return;
       const isSyncing = pairsRef.current.some(p => p.status === 'syncing' || !!p.progress);
-      const nextDelay = isSyncing ? 400 : 2000;
+      const nextDelay = isSyncing ? 1500 : 3000; // Fix #15: Reducir polling agresivo para 100GB+
       timerId = setTimeout(poll, nextDelay);
     };
 
@@ -114,7 +116,10 @@ export default function SyncApp() {
   }, []);
 
   const handleLogin = async () => {
+    if (isLoggingInRef.current) return;
+    isLoggingInRef.current = true;
     setIsLoggingIn(true);
+    setLoginError(null);
     try {
       const result = await googleSignIn();
       if (result) {
@@ -123,13 +128,32 @@ export default function SyncApp() {
         await syncService.setToken(result.accessToken);
         fetchBackendStatus();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Login failed:', err);
+      // Mostrar error descriptivo al usuario
+      const msg = err?.message || err?.toString() || 'Error desconocido al iniciar sesión';
+      // Simplificar errores comunes de OAuth
+      if (msg.includes('redirect_uri_mismatch')) {
+        setLoginError('Error de configuración: La URI de redirección no está registrada en Google Cloud Console. Contacta al desarrollador.');
+      } else if (msg.includes('access_denied')) {
+        setLoginError('Inicio de sesión cancelado. Debes permitir los permisos para usar la aplicación.');
+      } else if (msg.includes('popup_closed') || msg.includes('user_cancelled')) {
+        setLoginError('Ventana de inicio de sesión cerrada. Intenta de nuevo.');
+      } else if (msg.includes('REDIRECT_INITIATED')) {
+        // No es un error real, es la señal de que se inició redirect flow
+        setLoginError('Redirigiendo al navegador para autenticación... Vuelve a la app después de iniciar sesión.');
+      } else if (msg.includes('network') || msg.includes('Network') || msg.includes('ERR_CONNECTION')) {
+        setLoginError('Error de red. Verifica tu conexión a internet e intenta de nuevo.');
+      } else {
+        setLoginError(msg.length > 120 ? msg.substring(0, 120) + '...' : msg);
+      }
     } finally {
+      isLoggingInRef.current = false;
       setIsLoggingIn(false);
     }
   };
 
+  // B15 Fix: Limpiar también tokens de localStorage al cerrar sesión
   const handleLogout = async () => {
     await logout();
     await syncService.setToken(null);
@@ -193,8 +217,8 @@ export default function SyncApp() {
           </div>
           <h1 className="text-2xl font-medium mb-2">SyncClient</h1>
           <p className="text-neutral-400 text-sm mb-8">Conecta tu cuenta de Google Drive para empezar a sincronizar archivos de forma bidireccional.</p>
-          
-          <button 
+
+          <button
             onClick={handleLogin}
             disabled={isLoggingIn}
             className="w-full flex items-center justify-center space-x-3 bg-white text-black py-3 rounded-xl font-medium hover:bg-neutral-200 transition-colors disabled:opacity-50"
@@ -203,10 +227,10 @@ export default function SyncApp() {
               <RefreshCw className="animate-spin" size={18} />
             ) : (
               <svg className="w-5 h-5" viewBox="0 0 48 48">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
               </svg>
             )}
             <span>{isLoggingIn ? 'Conectando...' : 'Iniciar sesión con Google'}</span>
@@ -228,7 +252,7 @@ export default function SyncApp() {
           </div>
           <h1 className="font-semibold tracking-wide text-sm uppercase text-neutral-300">SyncClient</h1>
         </div>
-        
+
         <nav className="flex-1 px-4 space-y-1">
           <NavItem active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<Cloud size={18} />} label="Resumen" badge={pendingConflicts.length > 0 ? pendingConflicts.length : undefined} />
           <NavItem active={activeTab === 'folders'} onClick={() => setActiveTab('folders')} icon={<HardDrive size={18} />} label="Carpetas" />
@@ -239,13 +263,12 @@ export default function SyncApp() {
         <div className="p-4 border-t border-neutral-800">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-3 text-sm text-neutral-400">
-              <div className={`w-2 h-2 rounded-full ${
-                isSessionExpired ? 'bg-amber-400 animate-pulse' :
+              <div className={`w-2 h-2 rounded-full ${isSessionExpired ? 'bg-amber-400 animate-pulse' :
                 pairs.some(p => p.status === 'syncing') ? 'bg-blue-400 animate-pulse' : 'bg-green-400'
-              }`} />
+                }`} />
               <span>
                 {isSessionExpired ? 'Sesión expirada' :
-                 pairs.some(p => p.status === 'syncing') ? 'Sincronizando...' : 'Todo actualizado'}
+                  pairs.some(p => p.status === 'syncing') ? 'Sincronizando...' : 'Todo actualizado'}
               </span>
             </div>
           </div>
@@ -262,7 +285,7 @@ export default function SyncApp() {
                 <LogOut size={16} />
               </button>
             </div>
-            
+
             <div className="pt-2 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400">
               <span className="flex items-center gap-1.5 font-mono text-neutral-300">
                 <Users size={13} className="text-blue-400" />
@@ -288,15 +311,14 @@ export default function SyncApp() {
           <div className="flex flex-col truncate">
             <span className="font-bold tracking-wide text-xs uppercase text-white flex items-center gap-1.5">
               <span>SYNC CLIENT</span>
-              <div className={`w-2 h-2 rounded-full shrink-0 ${
-                isSessionExpired ? 'bg-amber-400 animate-pulse' :
+              <div className={`w-2 h-2 rounded-full shrink-0 ${isSessionExpired ? 'bg-amber-400 animate-pulse' :
                 pairs.some(p => p.status === 'syncing') ? 'bg-blue-400 animate-pulse' : 'bg-green-400'
-              }`} title={isSessionExpired ? 'Sesión expirada' : pairs.some(p => p.status === 'syncing') ? 'Sincronizando' : 'Al día'} />
+                }`} title={isSessionExpired ? 'Sesión expirada' : pairs.some(p => p.status === 'syncing') ? 'Sincronizando' : 'Al día'} />
             </span>
             <span className="text-[10px] text-neutral-400 font-mono truncate">{user?.email || 'Cuenta Google Activa'}</span>
           </div>
         </div>
-        
+
         <div className="flex items-center space-x-2 shrink-0">
           {isSessionExpired ? (
             <button
@@ -443,11 +465,10 @@ function NavItem({ active, onClick, icon, label, badge }: { active: boolean; onC
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm transition-colors ${
-        active 
-          ? 'bg-neutral-800/80 text-white' 
-          : 'text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200'
-      }`}
+      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm transition-colors ${active
+        ? 'bg-neutral-800/80 text-white'
+        : 'text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200'
+        }`}
     >
       <div className="flex items-center space-x-3">
         {icon}
@@ -515,7 +536,7 @@ function ConflictsSection({ conflicts, onResolve }: { conflicts: PendingConflict
 
 function OverviewTab({ pairs, events, conflictsCount }: { pairs: SyncPair[], events: SyncEvent[], conflictsCount: number }) {
   const activeCount = pairs.filter(p => p.status === 'syncing').length;
-  
+
   return (
     <div className="space-y-8">
       <header>
@@ -529,6 +550,11 @@ function OverviewTab({ pairs, events, conflictsCount }: { pairs: SyncPair[], eve
         <StatCard title="Eventos" value={events.length.toString()} icon={<Activity size={20} className="text-neutral-500" />} />
         <StatCard title="Conflictos" value={conflictsCount.toString()} icon={<AlertCircle size={20} className={conflictsCount > 0 ? 'text-amber-400' : 'text-neutral-500'} />} />
       </div>
+
+      {/* Barra de Progreso TOTAL de Sincronización (suma de todos los pares) */}
+      {pairs.some(p => p.status === 'syncing' || p.progress) && (
+        <TotalSyncProgressBar pairs={pairs} />
+      )}
 
       {pairs.some(p => p.status === 'syncing' || p.progress) && (
         <div className="space-y-3">
@@ -557,31 +583,30 @@ function OverviewTab({ pairs, events, conflictsCount }: { pairs: SyncPair[], eve
             {events.slice(0, 5).map(event => (
               <div key={event.id} className="flex items-center justify-between text-sm py-2 border-b border-neutral-800/40 last:border-0">
                 <div className="flex items-center space-x-3 truncate pr-4">
-                  <div className={`p-2 rounded-full shrink-0 ${
-                    event.action === 'uploaded' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                  <div className={`p-2 rounded-full shrink-0 ${event.action === 'uploaded' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
                     event.action === 'downloaded' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                    event.action === 'deleted' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                    event.action === 'cleaned' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' :
-                    event.action === 'sync_start' || event.action === 'sync_end' ? 'bg-teal-500/10 text-teal-300 border border-teal-500/20' :
-                    'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                  }`}>
+                      event.action === 'deleted' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                        event.action === 'cleaned' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' :
+                          event.action === 'sync_start' || event.action === 'sync_end' ? 'bg-teal-500/10 text-teal-300 border border-teal-500/20' :
+                            'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    }`}>
                     {event.action === 'uploaded' ? <Upload size={14} /> :
-                     event.action === 'downloaded' ? <Download size={14} /> :
-                     event.action === 'deleted' ? <Trash2 size={14} /> :
-                     event.action === 'cleaned' ? <CheckCircle2 size={14} /> :
-                     event.action === 'sync_start' || event.action === 'sync_end' ? <RefreshCw size={14} className={event.action === 'sync_start' ? 'animate-spin' : ''} /> :
-                     <AlertCircle size={14} />}
+                      event.action === 'downloaded' ? <Download size={14} /> :
+                        event.action === 'deleted' ? <Trash2 size={14} /> :
+                          event.action === 'cleaned' ? <CheckCircle2 size={14} /> :
+                            event.action === 'sync_start' || event.action === 'sync_end' ? <RefreshCw size={14} className={event.action === 'sync_start' ? 'animate-spin' : ''} /> :
+                              <AlertCircle size={14} />}
                   </div>
                   <div className="truncate">
                     <span className="text-neutral-200 font-medium">{event.filename}</span>
                     <span className="text-neutral-400 ml-2 font-mono text-xs">
                       {event.details ? `— ${event.details}` : (
-                       event.action === 'uploaded' ? 'Subido' :
-                       event.action === 'downloaded' ? 'Descargado' :
-                       event.action === 'deleted' ? 'Eliminado' :
-                       event.action === 'cleaned' ? 'Limpieza de duplicado' :
-                       event.action === 'sync_start' ? 'Iniciando verificación' :
-                       event.action === 'sync_end' ? 'Ciclo finalizado' : 'Conflicto')}
+                        event.action === 'uploaded' ? 'Subido' :
+                          event.action === 'downloaded' ? 'Descargado' :
+                            event.action === 'deleted' ? 'Eliminado' :
+                              event.action === 'cleaned' ? 'Limpieza de duplicado' :
+                                event.action === 'sync_start' ? 'Iniciando verificación' :
+                                  event.action === 'sync_end' ? 'Ciclo finalizado' : 'Conflicto')}
                     </span>
                   </div>
                 </div>
@@ -612,6 +637,71 @@ function StatCard({ title, value, icon }: { title: string; value: string; icon: 
   );
 }
 
+// Barra de progreso TOTAL de todos los pares sincronizándose activamente
+function TotalSyncProgressBar({ pairs }: { pairs: SyncPair[] }) {
+  const syncingPairs = pairs.filter(p => p.status === 'syncing' || p.progress);
+  if (syncingPairs.length === 0) return null;
+
+  const totalTransferred = syncingPairs.reduce((sum, p) => sum + (p.progress?.bytesTransferred || 0), 0);
+  const totalBytes = syncingPairs.reduce((sum, p) => sum + (p.progress?.totalBytes || 0), 0);
+  const totalFiles = syncingPairs.reduce((sum, p) => sum + (p.progress?.currentFileIndex || 0), 0);
+  const totalAllFiles = syncingPairs.reduce((sum, p) => sum + (p.progress?.totalFiles || 0), 0);
+
+  const pct = totalBytes > 0 ? Math.min(99, Math.round((totalTransferred / totalBytes) * 100)) : 0;
+
+  const formatSize = (bytes?: number) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  return (
+    <div className="bg-gradient-to-r from-blue-950/80 via-indigo-950/80 to-blue-950/80 border-2 border-blue-500/50 rounded-2xl p-5 shadow-xl shadow-blue-500/10">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-blue-300 uppercase tracking-wider flex items-center gap-2">
+            <RefreshCw size={16} className="animate-spin text-blue-400" />
+            Progreso Total de Sincronización
+            <span className="text-[11px] bg-blue-500/30 border border-blue-400/50 text-blue-200 px-2 py-0.5 rounded-full font-mono font-bold uppercase">
+              {syncingPairs.length} {syncingPairs.length === 1 ? 'carpeta' : 'carpetas'}
+            </span>
+          </h3>
+          <div className="flex items-center gap-3 font-mono text-xs text-neutral-300">
+            {totalBytes > 0 && (
+              <span className="text-emerald-400 font-bold bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-800/50">
+                {formatSize(totalTransferred)} / {formatSize(totalBytes)}
+              </span>
+            )}
+            {totalAllFiles > 0 && (
+              <span className="text-neutral-400 bg-neutral-900 px-2.5 py-1 rounded-lg border border-neutral-800">
+                {totalFiles} de {totalAllFiles} archivos
+              </span>
+            )}
+            <span className="font-bold text-cyan-400 bg-cyan-950/80 border border-cyan-800/60 px-2.5 py-1 rounded-lg text-sm">
+              {pct}%
+            </span>
+          </div>
+        </div>
+        <div className="w-full h-3 bg-neutral-950 rounded-full overflow-hidden p-0.5 border border-neutral-700 shadow-inner">
+          <div
+            className="h-full bg-gradient-to-r from-blue-500 via-indigo-400 to-cyan-400 rounded-full transition-all duration-500 relative shadow-md shadow-blue-500/40"
+            style={{ width: `${pct}%` }}
+          >
+            <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full"></div>
+          </div>
+        </div>
+        <p className="text-[11px] text-neutral-400 font-mono text-center">
+          {pct > 0
+            ? `Sincronizando ${formatSize(totalTransferred)} de ${formatSize(totalBytes)} en ${totalAllFiles} archivos`
+            : 'Analizando archivos pendientes y comparando versiones...'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null, status: SyncStatus, key?: string | number }) {
   if (status !== 'syncing' && !progress) return null;
 
@@ -619,9 +709,9 @@ function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null,
   const actionText = progress
     ? progress.action === 'subiendo' ? '🚀 Subiendo hacia Google Drive'
       : progress.action === 'descargando' ? '📥 Descargando a Dispositivo'
-      : progress.action === 'comprobando' ? '🔍 Analizando archivos y versiones'
-      : progress.action === 'deduplicando' ? '✨ Limpiando duplicados y obsoletos'
-      : '✅ Ciclo verificado exitosamente'
+        : progress.action === 'comprobando' ? '🔍 Analizando archivos y versiones'
+          : progress.action === 'deduplicando' ? '✨ Limpiando duplicados y obsoletos'
+            : '✅ Ciclo verificado exitosamente'
     : '⏳ Sincronizando en segundo plano...';
 
   const formatSize = (bytes?: number) => {
@@ -662,7 +752,7 @@ function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null,
         </div>
       </div>
       <div className="w-full h-2.5 bg-neutral-900 rounded-full overflow-hidden p-0.5 border border-neutral-800 shadow-inner">
-        <div 
+        <div
           className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 rounded-full transition-all duration-300 relative shadow-md shadow-cyan-500/30"
           style={{ width: `${pct}%` }}
         >
@@ -673,8 +763,8 @@ function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null,
   );
 }
 
-function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: { 
-  pairs: SyncPair[], 
+function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
+  pairs: SyncPair[],
   onAddPair: (p: SyncPair) => void,
   forceSync: (id: string) => void,
   pauseSync: (id: string) => void,
@@ -721,7 +811,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
       alert(`Error al limpiar duplicados: ${e.message || e}`);
     }
   };
-  
+
   return (
     <div className="space-y-6 pb-20 md:pb-0">
       <div className="flex items-center justify-between">
@@ -729,7 +819,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
           <h2 className="text-2xl font-medium text-white mb-1">Carpetas</h2>
           <p className="text-neutral-400 text-sm">Gestiona tus destinos de sincronización bidireccional.</p>
         </header>
-        <button 
+        <button
           onClick={() => setShowAdd(!showAdd)}
           className="flex items-center space-x-2 bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-neutral-200 transition-colors shadow-lg shadow-white/5"
         >
@@ -740,9 +830,9 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
 
       <AnimatePresence>
         {showAdd && (
-          <motion.div 
-            initial={{ opacity: 0, height: 0 }} 
-            animate={{ opacity: 1, height: 'auto' }} 
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
@@ -799,18 +889,18 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
                 <div className="flex flex-col items-start sm:items-end">
                   <span className="text-xs font-medium uppercase mb-0.5">
                     {pair.status === 'syncing' ? <span className="text-blue-400 flex items-center font-semibold"><RefreshCw size={12} className="mr-1.5 animate-spin text-blue-400" /> Sincronizando</span> :
-                     pair.status === 'paused' ? <span className="text-amber-400 flex items-center"><Pause size={12} className="mr-1.5" /> Pausado</span> :
-                     pair.status === 'unauthenticated' ? <span className="text-amber-400 flex items-center"><ShieldAlert size={12} className="mr-1.5" /> Re-conectar</span> :
-                     pair.status === 'idle' ? <span className="text-green-400 flex items-center font-semibold"><CheckCircle2 size={13} className="mr-1.5 text-green-400" /> Al día</span> :
-                     <span className="text-red-400 flex items-center"><AlertCircle size={12} className="mr-1.5" /> Error</span>}
+                      pair.status === 'paused' ? <span className="text-amber-400 flex items-center"><Pause size={12} className="mr-1.5" /> Pausado</span> :
+                        pair.status === 'unauthenticated' ? <span className="text-amber-400 flex items-center"><ShieldAlert size={12} className="mr-1.5" /> Re-conectar</span> :
+                          pair.status === 'idle' ? <span className="text-green-400 flex items-center font-semibold"><CheckCircle2 size={13} className="mr-1.5 text-green-400" /> Al día</span> :
+                            <span className="text-red-400 flex items-center"><AlertCircle size={12} className="mr-1.5" /> Error</span>}
                   </span>
                   <span className="text-[10px] text-neutral-500 font-mono">
                     {pair.lastSynced ? `Sync: ${new Date(pair.lastSynced).toLocaleTimeString()}` : 'Pendiente de inicio'}
                   </span>
                 </div>
-                
+
                 <div className="flex items-center space-x-2 shrink-0">
-                  <button 
+                  <button
                     onClick={() => forceSync(pair.id)}
                     disabled={pair.status === 'syncing'}
                     className="p-2 sm:px-3 sm:py-1.5 flex items-center justify-center space-x-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30 transition-colors shadow-md text-xs font-medium"
@@ -819,14 +909,14 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
                     <RefreshCw size={14} className={pair.status === 'syncing' ? 'animate-spin' : ''} />
                     <span className="hidden sm:inline">Sincronizar</span>
                   </button>
-                  <button 
+                  <button
                     onClick={() => pauseSync(pair.id)}
                     className="p-2 sm:px-2.5 sm:py-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 transition-colors text-neutral-300 hover:text-white border border-neutral-700 text-xs"
                     title={pair.status === 'paused' ? 'Reanudar vigilancia' : 'Pausar vigilancia automática'}
                   >
                     {pair.status === 'paused' ? <Play size={14} className="text-green-400" /> : <Pause size={14} />}
                   </button>
-                  <button 
+                  <button
                     onClick={() => removePair(pair.id)}
                     className="p-2 sm:px-2.5 sm:py-1.5 flex items-center justify-center rounded-lg bg-neutral-800/70 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-colors border border-neutral-800 text-xs"
                     title="Desvincular esta carpeta"
@@ -840,20 +930,19 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
             {/* Badges y Botones de Limpieza / Stubs */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-neutral-800/80 w-full">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-medium border ${
-                  pair.syncMode === 'streaming' 
-                    ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' 
-                    : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                }`}>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-medium border ${pair.syncMode === 'streaming'
+                  ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                  }`}>
                   {pair.syncMode === 'streaming' ? '☁️ MODO STREAMING (VIRTUAL)' : '🔄 MODO DUPLICADO (OFFLINE)'}
                 </span>
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono text-neutral-300 bg-neutral-950 border border-neutral-800 truncate max-w-[280px]">
                   {pair.cloudCategory === 'shared' ? '🌐 Colaborativa (Multi-Equipo)' : `💻 Ordenadores (${pair.deviceName || VFSBridge.getDeviceLabel()})`}
                 </span>
               </div>
-              
+
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto pt-1 sm:pt-0">
-                <button 
+                <button
                   type="button"
                   onClick={() => handleCleanDuplicates(pair)}
                   className="px-3 py-2 sm:py-1.5 bg-purple-600/20 hover:bg-purple-600/35 border border-purple-500/40 text-purple-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center sm:justify-start space-x-1.5 shadow-sm"
@@ -862,7 +951,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
                   <span>✨ Limpiar Duplicados</span>
                 </button>
                 {pair.syncMode === 'streaming' ? (
-                  <button 
+                  <button
                     onClick={() => handleHydrate(pair.id)}
                     className="px-3 py-2 sm:py-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center sm:justify-start space-x-1.5 shadow-sm"
                     title="Descargar todos los archivos al disco duro local para acceso offline"
@@ -870,7 +959,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
                     <span>📥 Hidratar para Offline</span>
                   </button>
                 ) : (
-                  <button 
+                  <button
                     onClick={() => handleDehydrate(pair.id)}
                     className="px-3 py-2 sm:py-1.5 bg-amber-600/20 hover:bg-amber-600/35 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center sm:justify-start space-x-1.5 shadow-sm"
                     title="Reemplazar ficheros locales por Stubs ligeros en nube para liberar disco"
@@ -1115,7 +1204,7 @@ function LocalFolderModal({
   onSelect: (path: string) => void;
   initialPath: string;
 }) {
-  const [currentPath, setCurrentPath] = useState(initialPath || (VFSBridge.isNative() ? '/storage/emulated/0/Documents' : '/home/fayfer/Documentos'));
+  const [currentPath, setCurrentPath] = useState(initialPath || (VFSBridge.isNative() ? '/storage/emulated/0/Documents' : VFSBridge.getHomeDir() + '/Documentos'));
   const [folders, setFolders] = useState<Array<{ name: string; path: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1125,17 +1214,17 @@ function LocalFolderModal({
 
   const shortcuts = VFSBridge.isNative()
     ? [
-        { label: '📄 Documents', path: '/storage/emulated/0/Documents' },
-        { label: '⭐ StarNote Export', path: '/storage/emulated/0/Documents/StarNote/export' },
-        { label: '📥 Download', path: '/storage/emulated/0/Download' },
-        { label: '💾 Raíz Almacenamiento', path: '/storage/emulated/0' }
-      ]
+      { label: '📄 Documents', path: '/storage/emulated/0/Documents' },
+      { label: '⭐ StarNote Export', path: '/storage/emulated/0/Documents/StarNote/export' },
+      { label: '📥 Download', path: '/storage/emulated/0/Download' },
+      { label: '💾 Raíz Almacenamiento', path: '/storage/emulated/0' }
+    ]
     : [
-        { label: '📁 Documentos', path: '/home/fayfer/Documentos' },
-        { label: '📑 Apuntes Tablet StarNote', path: '/home/fayfer/Documentos/Apuntes_Tablet_StarNote' },
-        { label: '📥 Descargas', path: '/home/fayfer/Descargas' },
-        { label: '🏠 Home', path: '/home/fayfer' }
-      ];
+      { label: '📁 Documentos', path: VFSBridge.getHomeDir() + '/Documentos' },
+      { label: '📑 Apuntes Tablet StarNote', path: VFSBridge.getHomeDir() + '/Documentos/Apuntes_Tablet_StarNote' },
+      { label: '📥 Descargas', path: VFSBridge.getHomeDir() + '/Descargas' },
+      { label: '🏠 Home', path: VFSBridge.getHomeDir() }
+    ];
 
   useEffect(() => {
     if (isOpen) {
@@ -1217,11 +1306,10 @@ function LocalFolderModal({
               key={i}
               type="button"
               onClick={() => setCurrentPath(s.path)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors border ${
-                currentPath === s.path || currentPath.startsWith(s.path + '/')
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                  : 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
-              }`}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors border ${currentPath === s.path || currentPath.startsWith(s.path + '/')
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                : 'bg-neutral-900 text-neutral-300 border-neutral-800 hover:bg-neutral-800'
+                }`}
             >
               {s.label}
             </button>
@@ -1341,7 +1429,7 @@ function LocalFolderModal({
 }
 
 function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCancel: () => void }) {
-  const [local, setLocal] = useState(VFSBridge.isNative() ? '/storage/emulated/0/Documents/StarNote/export' : '/home/fayfer/Documentos/Apuntes_Tablet_StarNote');
+  const [local, setLocal] = useState(VFSBridge.isNative() ? '/storage/emulated/0/Documents/StarNote/export' : VFSBridge.getHomeDir() + '/Documentos/Apuntes_Tablet_StarNote');
   const [remote, setRemote] = useState('GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote');
   const [direction, setDirection] = useState<SyncDirection>('bidirectional');
   const [syncMode, setSyncMode] = useState<SyncMode>('mirror');
@@ -1421,13 +1509,13 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
               <p className="text-xs text-neutral-300 leading-relaxed mb-3">
                 Directorio físico donde tus apps (ej. StarNote en Tablet) crean y guardan tus documentos o apuntes en PDF.
               </p>
-              
+
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="relative flex-1 min-w-0">
                   <Folder size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 shrink-0" />
-                  <input 
-                    type="text" 
-                    value={local} 
+                  <input
+                    type="text"
+                    value={local}
                     onChange={e => { setLocal(e.target.value); setCloudCategory(VFSBridge.getDefaultCloudCategory(e.target.value)); }}
                     placeholder="/storage/emulated/0/..."
                     className="w-full bg-neutral-950/90 border border-neutral-700 rounded-xl pl-10 pr-3.5 py-2.5 text-xs sm:text-sm text-white font-mono focus:outline-none focus:border-emerald-500 shadow-inner transition-colors"
@@ -1445,14 +1533,14 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
                 </button>
               </div>
             </div>
-            
+
             {/* Atajos Rápidos */}
             <div className="pt-3 border-t border-emerald-900/40 flex items-center flex-wrap gap-2">
               <span className="text-[11px] font-semibold text-emerald-400/90">⚡ Atajos veloces:</span>
               <button
                 type="button"
                 onClick={() => {
-                  const p = VFSBridge.isNative() ? '/storage/emulated/0/Documents/StarNote/export' : '/home/fayfer/Documentos/Apuntes_Tablet_StarNote';
+                  const p = VFSBridge.isNative() ? '/storage/emulated/0/Documents/StarNote/export' : VFSBridge.getHomeDir() + '/Documentos/Apuntes_Tablet_StarNote';
                   setLocal(p);
                   setCloudCategory(VFSBridge.getDefaultCloudCategory(p));
                 }}
@@ -1472,7 +1560,7 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
               ) : (
                 <button
                   type="button"
-                  onClick={() => { setLocal('/home/fayfer/Documentos'); setCloudCategory('computers'); }}
+                  onClick={() => { setLocal(VFSBridge.getHomeDir() + '/Documentos'); setCloudCategory('computers'); }}
                   className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 transition-colors"
                 >
                   📁 Documentos Linux
@@ -1496,13 +1584,13 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
               <p className="text-xs text-neutral-300 leading-relaxed mb-3">
                 Ubicación en tu Google Drive donde se clonarán tus archivos. Las carpetas inexistentes se crearán automáticamente.
               </p>
-              
+
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="relative flex-1 min-w-0">
                   <Cloud size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400 shrink-0" />
-                  <input 
-                    type="text" 
-                    value={remote} 
+                  <input
+                    type="text"
+                    value={remote}
                     onChange={e => setRemote(e.target.value)}
                     placeholder="GoogleDrive:/..."
                     className="w-full bg-neutral-950/90 border border-neutral-700 rounded-xl pl-10 pr-3.5 py-2.5 text-xs sm:text-sm text-white font-mono focus:outline-none focus:border-blue-500 shadow-inner transition-colors"
@@ -1520,7 +1608,7 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
                 </button>
               </div>
             </div>
-            
+
             {/* Atajos Remoto */}
             <div className="pt-3 border-t border-blue-900/40 flex items-center flex-wrap gap-2">
               <span className="text-[11px] font-semibold text-blue-400/90">☁️ Ruta oficial:</span>
@@ -1536,17 +1624,17 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
           </div>
         </div>
       </div>
-      
+
       <GoogleDriveFolderModal isOpen={showDriveModal} onClose={() => setShowDriveModal(false)} onSelect={path => setRemote(path)} />
       <LocalFolderModal isOpen={showLocalModal} onClose={() => setShowLocalModal(false)} onSelect={path => { setLocal(path); setCloudCategory(VFSBridge.getDefaultCloudCategory(path)); }} initialPath={local} />
-      
+
       {/* Sección 2: Dirección y Flujo de la Sincronización */}
       <div className="bg-neutral-950/70 border border-neutral-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-inner">
         <div className="flex items-center space-x-2 text-white">
           <ArrowLeftRight size={18} className="text-indigo-400 shrink-0" />
           <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-300">2. Dirección del Flujo de Sincronización</h4>
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label className={`p-4 sm:p-5 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between text-left relative overflow-hidden ${direction === 'bidirectional' ? 'border-blue-500 bg-gradient-to-b from-blue-500/20 to-neutral-900/90 text-white shadow-xl shadow-blue-500/10' : 'border-neutral-800 bg-neutral-900/50 hover:border-neutral-700 hover:bg-neutral-900 text-neutral-400'}`}>
             <div>
@@ -1698,15 +1786,15 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
           <span>💡 <strong className="text-neutral-200 font-normal">Tip:</strong> Puedes pausar o desvincular esta regla de sincronización en cualquier instante desde la pestaña Carpetas.</span>
         </p>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto shrink-0">
-          <button 
-            type="button" 
-            onClick={onCancel} 
+          <button
+            type="button"
+            onClick={onCancel}
             className="px-5 py-3 text-xs sm:text-sm font-bold text-neutral-300 hover:text-white bg-neutral-800/80 hover:bg-neutral-700 border border-neutral-700 rounded-xl transition-all text-center"
           >
             Cancelar
           </button>
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="px-6 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-xl shadow-blue-500/30 flex items-center justify-center space-x-2.5 active:scale-95 border border-blue-400/30"
           >
             <Plus size={18} className="stroke-[3]" />
@@ -1745,7 +1833,7 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
           <h2 className="text-2xl font-medium text-white mb-1">Registro de Actividad</h2>
           <p className="text-neutral-400 text-sm">Historial en tiempo real de transferencias, deduplicación y verificación de tus ficheros.</p>
         </div>
-        
+
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full xl:w-auto">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -1757,7 +1845,7 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
               className="w-full sm:w-48 bg-neutral-900 border border-neutral-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-neutral-600 font-mono"
             />
           </div>
-          
+
           <div className="flex flex-wrap items-center bg-neutral-900 border border-neutral-800 rounded-lg p-1 gap-1 justify-center sm:justify-start">
             <button onClick={() => setFilter('all')} className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filter === 'all' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>Todos</button>
             <button onClick={() => setFilter('uploaded')} className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filter === 'uploaded' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}`}>Subidos</button>
@@ -1815,20 +1903,19 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
                       )}
                     </td>
                     <td className="px-6 py-3.5 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${
-                        event.action === 'uploaded' ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' :
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${event.action === 'uploaded' ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' :
                         event.action === 'downloaded' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
-                        event.action === 'deleted' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                        event.action === 'cleaned' ? 'bg-purple-500/10 text-purple-300 border-purple-500/30' :
-                        event.action === 'sync_start' || event.action === 'sync_end' || event.action === 'info' ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' :
-                        'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                      }`}>
+                          event.action === 'deleted' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                            event.action === 'cleaned' ? 'bg-purple-500/10 text-purple-300 border-purple-500/30' :
+                              event.action === 'sync_start' || event.action === 'sync_end' || event.action === 'info' ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' :
+                                'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                        }`}>
                         {event.action === 'uploaded' ? '↑ Subido a Drive' :
-                         event.action === 'downloaded' ? '↓ Descargado de Drive' :
-                         event.action === 'deleted' ? '× Eliminado' :
-                         event.action === 'cleaned' ? '✨ Limpiado / Renombrado' :
-                         event.action === 'sync_start' ? '⏳ Analizando' :
-                         event.action === 'sync_end' ? '✅ Verificado al día' : '! Conflicto de Versión'}
+                          event.action === 'downloaded' ? '↓ Descargado de Drive' :
+                            event.action === 'deleted' ? '× Eliminado' :
+                              event.action === 'cleaned' ? '✨ Limpiado / Renombrado' :
+                                event.action === 'sync_start' ? '⏳ Analizando' :
+                                  event.action === 'sync_end' ? '✅ Verificado al día' : '! Conflicto de Versión'}
                       </span>
                     </td>
                     <td className="px-6 py-3.5">
@@ -1880,7 +1967,7 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
                     <span className="font-semibold text-neutral-100 text-sm break-all">{event.filename}</span>
                     <span className="text-[11px] text-neutral-400 font-mono shrink-0">{new Date(event.timestamp).toLocaleTimeString()}</span>
                   </div>
-                  
+
                   {event.details && (
                     <div className="text-[11px] font-mono text-emerald-400 bg-emerald-950/30 px-2.5 py-1.5 rounded-lg border border-emerald-500/20 leading-relaxed">
                       ℹ️ {event.details}
@@ -1888,20 +1975,19 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
                   )}
 
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${
-                      event.action === 'uploaded' ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' :
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold border ${event.action === 'uploaded' ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' :
                       event.action === 'downloaded' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
-                      event.action === 'deleted' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
-                      event.action === 'cleaned' ? 'bg-purple-500/10 text-purple-300 border-purple-500/30' :
-                      event.action === 'sync_start' || event.action === 'sync_end' || event.action === 'info' ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' :
-                      'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                    }`}>
+                        event.action === 'deleted' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                          event.action === 'cleaned' ? 'bg-purple-500/10 text-purple-300 border-purple-500/30' :
+                            event.action === 'sync_start' || event.action === 'sync_end' || event.action === 'info' ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' :
+                              'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                      }`}>
                       {event.action === 'uploaded' ? '↑ Subido a Drive' :
-                       event.action === 'downloaded' ? '↓ Descargado a Móvil' :
-                       event.action === 'deleted' ? '× Eliminado' :
-                       event.action === 'cleaned' ? '✨ Limpieza de Duplicado' :
-                       event.action === 'sync_start' ? '⏳ Analizando...' :
-                       event.action === 'sync_end' ? '✅ Verificando' : '! Conflicto'}
+                        event.action === 'downloaded' ? '↓ Descargado a Móvil' :
+                          event.action === 'deleted' ? '× Eliminado' :
+                            event.action === 'cleaned' ? '✨ Limpieza de Duplicado' :
+                              event.action === 'sync_start' ? '⏳ Analizando...' :
+                                event.action === 'sync_end' ? '✅ Verificando' : '! Conflicto'}
                     </span>
 
                     {event.webViewLink ? (
@@ -1989,7 +2075,7 @@ function SettingsTab({ settings, onUpdateSettings }: { settings: SyncSettings, o
         <h2 className="text-2xl font-medium text-white mb-1">Ajustes</h2>
         <p className="text-neutral-400 text-sm">Configurar preferencias globales de sincronización, exclusiones y sistema.</p>
       </header>
-      
+
       <div className="max-w-3xl space-y-6">
         {/* Editor .syncignore para LaTeX / Desarrollo */}
         <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-md">
@@ -2069,21 +2155,21 @@ function SettingsTab({ settings, onUpdateSettings }: { settings: SyncSettings, o
           <div className="space-y-4">
             <div>
               <label className="block text-xs text-neutral-400 mb-2">Velocidad Máx. de Descarga (KB/s)</label>
-              <input 
-                type="number" 
-                value={settings.maxDownloadSpeed} 
+              <input
+                type="number"
+                value={settings.maxDownloadSpeed}
                 onChange={(e) => onUpdateSettings({ ...settings, maxDownloadSpeed: parseInt(e.target.value) || 0 })}
-                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white" 
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white"
               />
               <p className="text-[10px] text-neutral-500 mt-1">Establecer en 0 para ilimitado.</p>
             </div>
             <div>
               <label className="block text-xs text-neutral-400 mb-2">Velocidad Máx. de Subida (KB/s)</label>
-              <input 
-                type="number" 
+              <input
+                type="number"
                 value={settings.maxUploadSpeed}
                 onChange={(e) => onUpdateSettings({ ...settings, maxUploadSpeed: parseInt(e.target.value) || 0 })}
-                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white" 
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white"
               />
             </div>
           </div>

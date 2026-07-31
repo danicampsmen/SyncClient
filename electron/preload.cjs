@@ -1,25 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Ocultar marcas de Electron a los scripts JS de Google OAuth en el DOM
-try {
-  if (typeof window !== 'undefined') {
-    Object.defineProperty(Object.getPrototypeOf(navigator), 'userAgentData', {
-      get: () => undefined,
-      configurable: true
-    });
-    Object.defineProperty(navigator, 'userAgentData', {
-      get: () => undefined,
-      configurable: true
-    });
-    Object.defineProperty(window, 'chrome', {
-      value: { runtime: {} },
-      configurable: true,
-      writable: true
-    });
-  }
-} catch (e) {
-  // Ignorar si no se puede sobrescribir
-}
+// CORRECCIÓN CRÍTICA: No sobrescribir navigator.userAgentData ni window.chrome
+// ya que Chromium (Electron) los necesita internamente para IndexedDB,
+// Firebase Auth, y la detección de capacidades del navegador.
+// El User-Agent ya se enmascara como Firefox a nivel de sesión en main.cjs,
+// que es suficiente para Google OAuth.
 
 // Exponer funciones seguras hacia el frontend (sin Node.js completo)
 contextBridge.exposeInMainWorld('electronBridge', {

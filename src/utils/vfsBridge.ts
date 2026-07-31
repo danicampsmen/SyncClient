@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { DEFAULT_LOCAL_DIR_NAME, ANDROID_STARNOTE_BASE, ANDROID_STARNOTE_EXPORT } from '../shared/CoreSyncLogic';
 
 /**
  * VFSBridge (Virtual File System Bridge)
@@ -33,22 +34,34 @@ export class VFSBridge {
   }
 
   /**
+   * Devuelve el directorio HOME del usuario actual (Linux/macOS/Windows)
+   * Usado como base para rutas de archivo genéricas en lugar de paths hardcodeados
+   */
+  public static getHomeDir(): string {
+    if (typeof process !== 'undefined' && process.env?.HOME) {
+      return process.env.HOME;
+    }
+    if (typeof process !== 'undefined' && process.env?.USERPROFILE) {
+      return process.env.USERPROFILE;
+    }
+    return '/home/user';
+  }
+
+  /**
    * Permite seleccionar o sugerir rutas locales en el dispositivo actual
    * Especial para seleccionar la carpeta de apuntes de StarNote en Android o ~/Documentos en Linux
    */
   public static async selectLocalFolder(customPrompt?: string): Promise<string | null> {
     if (this.isNative()) {
-      // En dispositivos Android con Capacitor sugerimos u ofrecemos el selector nativo / rutas comunes
       const suggestedAndroidPaths = [
-        '/storage/emulated/0/Documents/StarNote/export',
-        '/storage/emulated/0/Documents/StarNote',
+        ANDROID_STARNOTE_EXPORT,
+        ANDROID_STARNOTE_BASE,
         '/storage/emulated/0/Download/Respaldos',
         '/storage/emulated/0/DCIM/Camera'
       ];
       console.log('[VFSBridge/Android] Seleccionando ruta de almacenamiento nativa en dispositivo móvil.');
       return suggestedAndroidPaths[0];
     } else {
-      // En Linux usamos electronBridge si está disponible, o sugerencia de HOME
       if (typeof window !== 'undefined' && (window as any).electronBridge?.selectDirectory) {
         try {
           const res = await (window as any).electronBridge.selectDirectory();
@@ -57,7 +70,7 @@ export class VFSBridge {
           console.error('[VFSBridge] Error en selector nativo de Linux Desktop:', e);
         }
       }
-      return '/home/fayfer/Documentos/Apuntes_Tablet_StarNote';
+      return VFSBridge.getHomeDir() + '/Documentos/' + DEFAULT_LOCAL_DIR_NAME;
     }
   }
 
@@ -67,8 +80,8 @@ export class VFSBridge {
   public static async listLocalDirectories(dirPath: string): Promise<Array<{ name: string; path: string }>> {
     if (this.isNative()) {
       try {
-        try { await Filesystem.requestPermissions(); } catch (_) {}
-        
+        try { await Filesystem.requestPermissions(); } catch (_) { }
+
         let relativePath = dirPath.replace(/^\/storage\/emulated\/0\/?/, '');
         const res = await Filesystem.readdir({
           path: relativePath,
@@ -148,10 +161,14 @@ export class VFSBridge {
       });
       return typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
     } else {
-      const res = await fetch(`/api/local/files?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`/api/local/content?path=${encodeURIComponent(filePath)}`);
       if (!res.ok) throw new Error('Error al leer archivo en servidor de Linux');
-      const data = await res.json();
-      return data.content || '';
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        return data.content || '';
+      }
+      return await res.text();
     }
   }
 
@@ -168,7 +185,7 @@ export class VFSBridge {
       });
       console.log(`[VFSBridge/Android] Guardado exitoso con Capacitor Filesystem: ${filePath}`);
     } else {
-      const res = await fetch('/api/local/files/save', {
+      const res = await fetch('http://localhost:3000/api/local/content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: filePath, content: data })
@@ -209,7 +226,7 @@ export class VFSBridge {
             try {
               const st = await Filesystem.stat({ path: (cleanDir ? cleanDir + '/' : '') + f.name, directory: Directory.ExternalStorage });
               mtime = st.mtime;
-            } catch {}
+            } catch { }
           }
           const match = f.name.match(/^(.+?)(?:\s*\(\s*(\d+)\s*\))+\.([a-zA-Z0-9]+)$/);
           if (match) {
@@ -233,13 +250,13 @@ export class VFSBridge {
 
           for (const loser of losers) {
             const target = (cleanDir ? cleanDir + '/' : '') + loser.name;
-            await Filesystem.deleteFile({ path: target, directory: Directory.ExternalStorage }).catch(() => {});
+            await Filesystem.deleteFile({ path: target, directory: Directory.ExternalStorage }).catch(() => { });
             deleted++;
           }
           if (winner.name !== baseName) {
             const oldPath = (cleanDir ? cleanDir + '/' : '') + winner.name;
             const newPath = (cleanDir ? cleanDir + '/' : '') + baseName;
-            await Filesystem.rename({ from: oldPath, to: newPath, directory: Directory.ExternalStorage }).catch(() => {});
+            await Filesystem.rename({ from: oldPath, to: newPath, directory: Directory.ExternalStorage }).catch(() => { });
             renamed++;
           }
         }

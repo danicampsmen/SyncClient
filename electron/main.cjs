@@ -27,10 +27,51 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
+// --- PKCE Helpers (Node.js crypto) ---
+function base64URLEncode(buffer) {
+  return Buffer.from(buffer)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function generateCodeVerifier() {
+  const array = require('crypto').randomBytes(32);
+  return base64URLEncode(array);
+}
+
+function generateCodeChallenge(verifier) {
+  const hash = require('crypto').createHash('sha256').update(verifier).digest();
+  return base64URLEncode(hash);
+}
+
 // Manejador IPC para OAuth nativo de Google / Google Drive en Electron
+// Usa Authorization Code Flow con PKCE para obtener refresh_token
 ipcMain.handle('open-google-auth', async () => {
-  console.log('[Electron] Iniciando ventana nativa de OAuth con Google Drive...');
-  const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=123619653091-oodio89frb0ogcm89bc5btpigonl0r1a.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fgen-lang-client-0459053075.firebaseapp.com%2F__%2Fauth%2Fhandler&response_type=token&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive%20profile%20email&prompt=select_account';
+  console.log('[Electron] Iniciando ventana nativa de OAuth (PKCE Authorization Code Flow)...');
+
+  const firebaseConfig = require(path.join(__dirname, '..', 'firebase-applet-config.json'));
+  const clientId = firebaseConfig.oAuthClientId || '123619653091-oodio89frb0ogcm89bc5btpigonl0r1a.apps.googleusercontent.com';
+  const redirectUri = 'http://localhost:3000/api/oauth/callback';
+  const scope = 'https://www.googleapis.com/auth/drive profile email';
+
+  // Generar PKCE
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  const state = codeVerifier.substring(0, 16);
+
+  const authUrl =
+    `https://accounts.google.com/o/oauth2/v2/auth` +
+    `?client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&response_type=code` +
+    `&scope=${encodeURIComponent(scope)}` +
+    `&access_type=offline` +
+    `&prompt=consent` +
+    `&code_challenge=${encodeURIComponent(codeChallenge)}` +
+    `&code_challenge_method=S256` +
+    `&state=${encodeURIComponent(state)}`;
 
   return new Promise((resolve, reject) => {
     let authWindow = new BrowserWindow({
@@ -48,9 +89,12 @@ ipcMain.handle('open-google-auth', async () => {
 
     authWindow.webContents.setUserAgent(firefoxUserAgent);
 
-    // Eliminar cabeceras Sec-Ch-Ua que revelan a Electron ante Google OAuth
+    const authSession = session.fromPartition('auth-popup-session', { cache: true });
+    authWindow.webContents.session = authSession;
+    authWindow.webContents.setUserAgent(firefoxUserAgent);
+
     authWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      { urls: ['https://accounts.google.com/*', 'https://*.google.com/*', 'https://*.firebaseapp.com/*'] },
+      { urls: ['https://accounts.google.com/*', 'https://*.google.com/*', 'http://localhost:3000/*'] },
       (details, callback) => {
         delete details.requestHeaders['Sec-Ch-Ua'];
         delete details.requestHeaders['Sec-Ch-Ua-Mobile'];
@@ -63,27 +107,75 @@ ipcMain.handle('open-google-auth', async () => {
       }
     );
 
-    const handleUrl = (url) => {
-      if (url) {
-        console.log('[Electron] authWindow navegando a URL:', url.substring(0, 100));
-      }
-      if (url && (url.includes('access_token=') || url.includes('#access_token='))) {
-        try {
-          const raw = url.split('#')[1] || url.split('?')[1] || '';
-          const params = new URLSearchParams(raw);
-          const token = params.get('access_token');
-          if (token) {
-            console.log('[Electron] Token de Google OAuth obtenido con éxito!');
-            resolve(token);
-            setTimeout(() => {
-              if (authWindow && !authWindow.isDestroyed()) {
-                authWindow.destroy();
-              }
-            }, 150);
-          }
-        } catch (e) {
-          reject(e);
+    let codeReceived = false;
+
+    const handleUrl = async (url) => {
+      if (!url || codeReceived) return;
+      console.log('[Electron] authWindow navegando a URL:', url.substring(0, 120));
+
+      // Buscar ?code= o &code= en la URL de callback
+      const codeMatch = url.match(/[?&]code=([^&]+)/);
+      if (!codeMatch) {
+        // También detectar error de OAuth
+        if (url.includes('error=')) {
+          const errMatch = url.match(/[?&]error=([^&]+)/);
+          reject(new Error(`OAuth error: ${errMatch ? errMatch[1] : 'unknown'}`));
+          authWindow?.destroy();
         }
+        return;
+      }
+
+      codeReceived = true;
+      const code = decodeURIComponent(codeMatch[1]);
+      console.log('[Electron] Authorization code recibido. Delegando intercambio al backend (client_secret + code_verifier)...');
+
+      // Delegar siempre al backend, que tiene client_secret y recibe code_verifier
+      try {
+        const backendRes = await fetch('http://localhost:3000/api/oauth/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, codeVerifier })
+        });
+
+        if (!backendRes.ok) {
+          const errText = await backendRes.text();
+          console.error('[Electron] Backend token exchange failed:', backendRes.status, errText);
+          reject(new Error(`Error del servidor: ${backendRes.status} - ${errText}`));
+          authWindow?.destroy();
+          return;
+        }
+
+        const data = await backendRes.json();
+
+        if (data.error) {
+          console.error('[Electron] Error del backend:', data.error, data.detail || '');
+          reject(new Error(data.error + (data.detail ? ': ' + data.detail : '')));
+          authWindow?.destroy();
+          return;
+        }
+
+        if (!data.accessToken) {
+          console.error('[Electron] Backend no devolvió accessToken');
+          reject(new Error('El backend no devolvió accessToken.'));
+          authWindow?.destroy();
+          return;
+        }
+
+        console.log('[Electron] ✅ Tokens obtenidos con éxito! access_token + refresh_token');
+        resolve({
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken || null
+        });
+
+        setTimeout(() => {
+          if (authWindow && !authWindow.isDestroyed()) {
+            authWindow.destroy();
+          }
+        }, 150);
+      } catch (e) {
+        console.error('[Electron] Error en token exchange:', e);
+        reject(e);
+        authWindow?.destroy();
       }
     };
 
@@ -92,6 +184,9 @@ ipcMain.handle('open-google-auth', async () => {
     authWindow.webContents.on('did-redirect-navigation', (_event, url) => handleUrl(url));
 
     authWindow.on('closed', () => {
+      if (!codeReceived) {
+        reject(new Error('User closed the auth window'));
+      }
       authWindow = null;
     });
 
@@ -202,8 +297,12 @@ function createWindow() {
   });
 
   // Permitir la apertura de ventanas emergentes para el flujo de autenticación de Google/Firebase
+  // CORRECCIÓN CRÍTICA: contextIsolation=false + webSecurity=false causa colapso de IndexedDB
+  // porque ambas ventanas (main + popup) compiten por el mismo almacenamiento IndexedDB de Firebase Auth.
+  // Solución: contextIsolation=true + sesión aislada para el popup.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log('[Electron] Abriendo ventana emergente:', url);
+    const popupSession = session.fromPartition(`popup-${Date.now()}`, { cache: true });
     return {
       action: 'allow',
       overrideBrowserWindowOptions: {
@@ -212,8 +311,9 @@ function createWindow() {
         autoHideMenuBar: true,
         webPreferences: {
           nodeIntegration: false,
-          contextIsolation: false,
-          webSecurity: false,
+          contextIsolation: true,
+          webSecurity: true,
+          session: popupSession,
           userAgent: firefoxUserAgent,
           preload: path.join(__dirname, 'preload.cjs'),
         }
@@ -235,7 +335,7 @@ function createWindow() {
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           console.log('[Electron] Reintentando conexión con http://localhost:3000...');
-          mainWindow.loadURL('http://localhost:3000').catch(() => {});
+          mainWindow.loadURL('http://localhost:3000').catch(() => { });
         }
       }, 1000);
     }
@@ -268,7 +368,8 @@ app.whenReady().then(() => {
     contents.setUserAgent(firefoxUserAgent);
   });
 
-  startBackend();
+  // El backend ya es lanzado por concurrently (tsx server.ts). No es necesario cargarlo desde Electron.
+  // startBackend();
   createTray();
   createWindow();
 

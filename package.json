@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "syncclient",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,19 +11,21 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on tcp:3000 && electron . --no-sandbox\"",
     "electron:build": "npm run build && electron-builder",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "android:build": "npm run build && npx cap copy android",
     "android:open": "npx cap copy android && CAPACITOR_ANDROID_STUDIO_PATH=/opt/android-studio/bin/studio.sh npx cap open android",
     "android:deploy": "npm run android:build && cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew installDebug && cd .. && adb reverse tcp:3000 tcp:3000 && adb shell monkey -p com.syncclient.app -c android.intent.category.LAUNCHER 1"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
     "@capacitor/app": "^8.1.1",
     "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.4.2",
     "@capacitor/filesystem": "^8.1.2",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "better-sqlite3": "^13.0.2",
     "chokidar": "^5.0.0",
     "express": "^4.21.2",
     "firebase": "^12.16.0",
@@ -31,12 +33,15 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "sql.js": "^1.14.1",
     "vite": "^6.2.3"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
+    "@types/sql.js": "^1.4.11",
     "concurrently": "^10.0.4",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
@@ -44,7 +49,8 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "wait-on": "^9.1.0"
   },
   "build": {
     "appId": "com.syncclient.desktop",

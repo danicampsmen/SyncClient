@@ -3,6 +3,6 @@
   "description": "Bidirectional file synchronization dashboard for Linux.",
   "requestFramePermissions": [],
   "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+    "MAJOR_CAPABILITY_SERVER_SIDE_GOOGLE_DRIVE_API"
   ]
 }

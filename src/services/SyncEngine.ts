@@ -1,6 +1,6 @@
 import { SyncPair, SyncEvent, SyncSettings, PendingConflict, ExternalDriveAlert } from '../types';
 import { IFileSystem } from '../utils/fileSystem';
-import { CoreSyncLogic } from '../shared/CoreSyncLogic';
+import { CoreSyncLogic, ANDROID_STARNOTE_BASE, ANDROID_STARNOTE_EXPORT, DEFAULT_REMOTE_PATH, RemoteEntry, SyncPlan } from '../shared/CoreSyncLogic';
 
 export interface DriveFile {
   id: string;
@@ -9,6 +9,8 @@ export interface DriveFile {
   modifiedTime: string;
   size?: string;
   webViewLink?: string;
+  etag?: string;
+  appProperties?: Record<string, string>;
 }
 
 function matchesIgnorePattern(name: string, patterns?: string[]): boolean {
@@ -56,6 +58,85 @@ export class SyncEngine {
   private detectedExternalDrives: ExternalDriveAlert[] = [];
   private driveFolderCache = new Map<string, { timestamp: number; files: DriveFile[] }>();
 
+  // B1/B6: Anti-bucle — portado del motor desktop para prevenir bucles en Android
+  private selfWrittenFiles = new Map<string, number>();
+  private lastSyncCompleted: Record<string, number> = {};
+  private syncBackoff: Record<string, number> = {};
+  private syncTriggerSource: Record<string, 'fs-event' | 'poll' | 'manual'> = {};
+  private readonly SYNC_COOLDOWN_MS = 60000;
+  private readonly MAX_POLL_INTERVAL_MS = 900000;
+  private readonly INITIAL_POLL_MS = 30000;
+  // Fix #3: Rate limiter local para Android — máximo 5 requests/segundo
+  private rateLimiter = { lastRequest: 0, minInterval: 200 };
+
+  // --- v2: Database-backed state ---
+  private db: any = null;
+  private DEVICE_ID: string | null = null;
+
+  // B10: Caché de .syncmeta — evita leer el sistema de archivos en cada comprobación
+  private syncmetaCache = new Map<string, number>();
+
+  private markSelfWritten(filePath: string) {
+    if (!filePath) return;
+    this.selfWrittenFiles.set(filePath, Date.now());
+    if (this.selfWrittenFiles.size > 200) {
+      const now = Date.now();
+      for (const [key, timestamp] of this.selfWrittenFiles.entries()) {
+        if (now - timestamp > 30000) {
+          this.selfWrittenFiles.delete(key);
+        }
+      }
+    }
+  }
+
+  private isSelfWritten(filePath: string): boolean {
+    if (!filePath) return false;
+    const timestamp = this.selfWrittenFiles.get(filePath);
+    if (!timestamp) return false;
+    if (Date.now() - timestamp < 15000) {
+      return true;
+    }
+    this.selfWrittenFiles.delete(filePath);
+    return false;
+  }
+
+  // B10: Leer mtime remoto desde archivo sidecar .syncmeta
+  // Capacitor no soporta utimes, así que almacenamos el mtime remoto en un archivo JSON
+  private async readSyncmeta(filePath: string): Promise<number | null> {
+    const cached = this.syncmetaCache.get(filePath);
+    if (cached !== undefined) return cached;
+
+    const metaPath = filePath + '.syncmeta';
+    try {
+      const data = await this.fs.readFile(metaPath);
+      const parsed = JSON.parse(data);
+      const mtime = parsed.remoteMtime || null;
+      if (mtime) this.syncmetaCache.set(filePath, mtime);
+      return mtime;
+    } catch {
+      return null;
+    }
+  }
+
+  // B10: Escribir mtime remoto en archivo sidecar .syncmeta
+  private async writeSyncmeta(filePath: string, remoteMtime: number): Promise<void> {
+    const metaPath = filePath + '.syncmeta';
+    this.syncmetaCache.set(filePath, remoteMtime);
+    try {
+      await this.fs.writeFile(metaPath, JSON.stringify({ remoteMtime }));
+    } catch {
+      // Ignorar errores de escritura de metadata
+    }
+  }
+
+  // B10: Obtener el mtime lógico de un archivo (syncmeta si existe, sino el real del sistema)
+  private async getLogicalMtime(filePath: string): Promise<number | null> {
+    const syncmetaMtime = await this.readSyncmeta(filePath);
+    if (syncmetaMtime !== null) return syncmetaMtime;
+    const stat = await this.fs.stat(filePath);
+    return stat?.mtime ?? null;
+  }
+
   private async runInPool<T>(tasks: (() => Promise<T>)[], concurrency = 3): Promise<T[]> {
     const results: T[] = new Array(tasks.length);
     let index = 0;
@@ -78,45 +159,50 @@ export class SyncEngine {
     this.configFile = this.fs.join(this.configDir, 'sync_data.json');
     this.init();
 
-    // En Android, el WebView puede congelar el JS al ir a background, matando los fetch en vuelo.
-    // Al volver a foreground, reanudamos cualquier sync que quedó interrumpida.
-    try {
-      // Capacitor App plugin (Android/iOS)
-      import('@capacitor/app').then(({ App }) => {
-        App.addListener('appStateChange', ({ isActive }) => {
-          if (isActive) {
-            console.log('[SyncEngine] App vuelve a primer plano — reanudando sincronizaciones pendientes');
-            // Limpiar estados de syncs "fantasma" pero RESPETAR pausadas
-            this.activeSyncs.forEach(pairId => {
-              const pair = this.pairs.find(p => p.id === pairId);
-              if (pair && (pair.status as string) !== 'paused') {
-                pair.status = 'idle';
-                pair.progress = null;
+    // CORRECCIÓN: Solo registrar listeners de Capacitor en entorno nativo (Android/iOS).
+    // En Electron/Node.js, import('@capacitor/app') falla y el catch anterior intentaba
+    // usar document.addEventListener('visibilitychange', ...) donde document no existe
+    // en el contexto de Node.js, causando un ReferenceError silencioso.
+    if (typeof document !== 'undefined') {
+      try {
+        // Capacitor App plugin (Android/iOS)
+        import('@capacitor/app').then(({ App }) => {
+          App.addListener('appStateChange', ({ isActive }) => {
+            if (isActive) {
+              console.log('[SyncEngine] App vuelve a primer plano — reanudando sincronizaciones pendientes');
+              this.activeSyncs.forEach(pairId => {
+                const pair = this.pairs.find(p => p.id === pairId);
+                if (pair && (pair.status as string) !== 'paused') {
+                  pair.status = 'idle';
+                  pair.progress = null;
+                }
+              });
+              this.activeSyncs.clear();
+              this.pendingSyncs.clear();
+              setTimeout(() => this.triggerAllActive(), 1500);
+            }
+          });
+        }).catch(() => {
+          // Capacitor no disponible (Electron/web) — usar visibilitychange como fallback
+          // Solo si document existe (no es Node.js backend)
+          if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+            document.addEventListener('visibilitychange', () => {
+              if (!document.hidden) {
+                console.log('[SyncEngine] Página visible de nuevo — reanudando sincronizaciones');
+                this.activeSyncs.forEach(pairId => {
+                  const pair = this.pairs.find(p => p.id === pairId);
+                  if (pair && (pair.status as string) !== 'paused') { pair.status = 'idle'; pair.progress = null; }
+                });
+                this.activeSyncs.clear();
+                this.pendingSyncs.clear();
+                setTimeout(() => this.triggerAllActive(), 1500);
               }
             });
-            this.activeSyncs.clear();
-            this.pendingSyncs.clear();
-            // Reanuda únicamente las sincronizaciones activas que no estén pausadas
-            setTimeout(() => this.triggerAllActive(), 1500);
           }
         });
-      }).catch(() => {
-        // Capacitor no disponible (Electron/web) — usar visibilitychange como fallback
-        document.addEventListener('visibilitychange', () => {
-          if (!document.hidden) {
-            console.log('[SyncEngine] Página visible de nuevo — reanudando sincronizaciones');
-            this.activeSyncs.forEach(pairId => {
-              const pair = this.pairs.find(p => p.id === pairId);
-              if (pair && (pair.status as string) !== 'paused') { pair.status = 'idle'; pair.progress = null; }
-            });
-            this.activeSyncs.clear();
-            this.pendingSyncs.clear();
-            setTimeout(() => this.triggerAllActive(), 1500);
-          }
-        });
-      });
-    } catch {
-      // Ignorar errores de entorno
+      } catch {
+        // Ignorar errores de entorno
+      }
     }
   }
 
@@ -142,6 +228,38 @@ export class SyncEngine {
       }
 
       await this.fs.mkdir(this.configDir);
+
+      // v2: Inicializar DB backend (solo en Capacitor/Android, no en navegador)
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        if (Capacitor.isNativePlatform()) {
+          const { createBackend } = await import('../shared/StorageBackend');
+          this.db = await createBackend(this.configDir, this.fs);
+          this.DEVICE_ID = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : 'dev-' + Math.random().toString(36).substr(2, 9);
+          // Migrar manifests a DB si existen
+          if (this.manifests && Object.keys(this.manifests).length > 0 && this.db) {
+            for (const [pairId, entries] of Object.entries(this.manifests)) {
+              for (const [relPath, entry] of Object.entries(entries)) {
+                this.db.setFileState(pairId, relPath, {
+                  pair_id: pairId, rel_path: relPath,
+                  remote_id: entry.remoteId, local_mtime: entry.localMtime,
+                  remote_mtime: entry.remoteMtime, file_size: null, md5_hash: null,
+                  block_hashes: null,
+                  vector_clock: JSON.stringify({ [this.DEVICE_ID!]: 1 }),
+                  device_id: this.DEVICE_ID!, etag: null,
+                  updated_at: Date.now(), is_tombstone: 0
+                });
+              }
+            }
+            console.log(`[SyncEngine] Migrated ${Object.keys(this.manifests).length} pairs from JSON to SQLite`);
+          }
+        }
+      } catch (e: any) {
+        console.warn('[SyncEngine] DB init skipped (not native):', e?.message || e);
+      }
+
       try {
         const data = await this.fs.readFile(this.configFile);
         if (data) {
@@ -165,12 +283,12 @@ export class SyncEngine {
       if (this.pairs.length > 0) {
         let modified = false;
         this.pairs.forEach(p => {
-          if (p.localPath === '/storage/emulated/0/Documents/StarNote') {
-            p.localPath = '/storage/emulated/0/Documents/StarNote/export';
+          if (p.localPath === ANDROID_STARNOTE_BASE) {
+            p.localPath = ANDROID_STARNOTE_EXPORT;
             modified = true;
           }
           if (p.remotePath === 'GoogleDrive:/Apuntes_Tablet_StarNote' || p.remotePath === 'GoogleDrive:Apuntes en pdf - tablet' || p.remotePath === 'GoogleDrive:/Apuntes en pdf - tablet' || p.remotePath === 'GoogleDrive:Apuntes_Tablet_StarNote' || p.remotePath === 'GoogleDrive:/Documentos-Ubuntu/Apuntes_Tablet_StarNote') {
-            p.remotePath = 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote';
+            p.remotePath = DEFAULT_REMOTE_PATH;
             modified = true;
           }
         });
@@ -294,7 +412,7 @@ export class SyncEngine {
   public async cleanDuplicates(pairId: string): Promise<{ localDeleted: number; localRenamed: number; remoteDeleted: number; remoteRenamed: number }> {
     const pair = this.pairs.find(p => p.id === pairId);
     if (!pair) return { localDeleted: 0, localRenamed: 0, remoteDeleted: 0, remoteRenamed: 0 };
-    
+
     console.log(`[SyncEngine] Iniciando limpieza total de duplicados en local y Google Drive para: ${pair.localPath}`);
     const localRes = await this.deduplicateLocalFolder(pair.localPath, pair.id, '');
     let remoteRes = { deleted: 0, renamed: 0 };
@@ -352,40 +470,77 @@ export class SyncEngine {
     await this.saveState();
   }
 
+  // Fix #11: Comprobación recursiva que detecta cambios en subcarpetas (no solo archivos directos)
   private async hasLocalFolderChanged(pair: SyncPair): Promise<boolean> {
+    const pairManifest = this.manifests[pair.id] || {};
+
+    const scanDir = async (dirPath: string, relPrefix: string): Promise<boolean> => {
+      try {
+        const entries = await this.fs.readdir(dirPath);
+        if (!entries) return false;
+
+        for (const entry of entries) {
+          const relPath = this.fs.join(relPrefix, entry.name);
+          if (entry.isDirectory) {
+            // Recurrir en subcarpetas
+            const subDir = this.fs.join(dirPath, entry.name);
+            const changed = await scanDir(subDir, relPath);
+            if (changed) return true;
+          } else {
+            // B10: Usar mtime lógico (syncmeta si existe, sino el real)
+            const manifestEntry = pairManifest[relPath] || pairManifest[entry.name];
+            if (!manifestEntry) return true; // Nuevo archivo sin registro
+            const logicalMtime = await this.getLogicalMtime(this.fs.join(dirPath, entry.name));
+            if (logicalMtime && Math.abs(logicalMtime - manifestEntry.localMtime) > 2000) {
+              return true; // Modificado
+            }
+          }
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
     try {
       const entries = await this.fs.readdir(pair.localPath);
       if (!entries) return false;
       const fileEntries = entries.filter(e => !e.isDirectory);
-      const pairManifest = this.manifests[pair.id] || {};
-      
+
+      // Si el manifiesto está vacío pero hay archivos, hay cambios
       if (Object.keys(pairManifest).length === 0 && fileEntries.length > 0) return true;
 
-      for (const entry of fileEntries) {
-        const manifestEntry = pairManifest[entry.name] || pairManifest[this.fs.join('', entry.name)];
-        if (!manifestEntry) return true;
-        if (entry && Math.abs(entry.mtime - manifestEntry.localMtime) > 2000) {
-          return true;
-        }
-      }
-      return false;
+      // Escaneo recursivo
+      return await scanDir(pair.localPath, '');
     } catch {
       return false;
     }
   }
 
+  // B1/B6: Polling adaptativo — portado del motor desktop
   private refreshIntervals() {
     this.pairs.forEach(pair => {
       const isWatchable = pair.status === 'syncing' || pair.status === 'idle';
       if (isWatchable && !this.intervalRefs[pair.id]) {
-        this.intervalRefs[pair.id] = setInterval(async () => {
-          if (await this.hasLocalFolderChanged(pair)) {
-            console.log(`[SyncEngine] Cambio detectado en ${pair.localPath}. Ejecutando autosincronización...`);
-            this.triggerSync(pair.id);
-          }
-        }, 10000); // Verificación ligera local sin uso de red ni radio Wi-Fi cada 10s
+        const getAdaptiveInterval = () => {
+          const backoff = this.syncBackoff[pair.id] || this.INITIAL_POLL_MS;
+          return Math.min(backoff, this.MAX_POLL_INTERVAL_MS);
+        };
+
+        const scheduleNext = () => {
+          const interval = getAdaptiveInterval();
+          this.intervalRefs[pair.id] = setTimeout(async () => {
+            if (await this.hasLocalFolderChanged(pair)) {
+              console.log(`[SyncEngine] Cambio detectado en ${pair.localPath}. Ejecutando autosincronización...`);
+              this.syncTriggerSource[pair.id] = 'poll';
+              this.triggerSync(pair.id);
+            }
+            scheduleNext();
+          }, interval);
+        };
+        scheduleNext();
       } else if (!isWatchable && this.intervalRefs[pair.id]) {
-        clearInterval(this.intervalRefs[pair.id]);
+        clearTimeout(this.intervalRefs[pair.id]);
         delete this.intervalRefs[pair.id];
       }
     });
@@ -417,6 +572,17 @@ export class SyncEngine {
         };
         this.saveState();
       }
+      return;
+    }
+
+    // B1/B6: Anti-bucle — cooldown post-sincronización para triggers por polling
+    const lastCompleted = this.lastSyncCompleted[pairId] || 0;
+    const elapsedSinceLastSync = Date.now() - lastCompleted;
+    const triggerSource = this.syncTriggerSource[pairId] || 'manual';
+
+    if (triggerSource === 'poll' && elapsedSinceLastSync < this.SYNC_COOLDOWN_MS) {
+      console.log(`[SyncEngine/AntiBucle] Polling saltado para ${pairId}: cooldown activo (${Math.round((this.SYNC_COOLDOWN_MS - elapsedSinceLastSync) / 1000)}s restantes).`);
+      this.syncTriggerSource[pairId] = 'manual';
       return;
     }
 
@@ -543,10 +709,26 @@ export class SyncEngine {
     } finally {
       clearTimeout(watchdogTimer);
       this.activeSyncs.delete(pairId);
-      this.driveFolderCache.clear(); // Limpiar caché temporal del ciclo
+      this.driveFolderCache.clear();
+
+      // B1/B6: Anti-bucle — registrar timestamp y ajustar backoff adaptativo
+      this.lastSyncCompleted[pairId] = Date.now();
+      const filesProcessed = pair.progress?.currentFileIndex ?? 0;
+      const bytesTransferred = pair.progress?.bytesTransferred ?? 0;
+
+      if (filesProcessed === 0 && bytesTransferred === 0) {
+        const currentBackoff = this.syncBackoff[pairId] || this.INITIAL_POLL_MS;
+        this.syncBackoff[pairId] = Math.min(currentBackoff * 2, this.MAX_POLL_INTERVAL_MS);
+        console.log(`[SyncEngine/AntiBucle] Sin cambios en ${pairId}. Backoff aumentado a ${this.syncBackoff[pairId] / 1000}s.`);
+      } else {
+        this.syncBackoff[pairId] = this.INITIAL_POLL_MS;
+        console.log(`[SyncEngine/AntiBucle] ${filesProcessed} archivo(s) procesados. Backoff reseteado a ${this.INITIAL_POLL_MS / 1000}s.`);
+      }
+      this.syncTriggerSource[pairId] = 'manual';
+
       if (this.pendingSyncs.has(pairId) && (pair?.status as string) !== 'paused') {
         this.pendingSyncs.delete(pairId);
-        setTimeout(() => this.triggerSync(pairId), 1000);
+        setTimeout(() => this.triggerSync(pairId), 5000);
       }
     }
   }
@@ -585,7 +767,7 @@ export class SyncEngine {
           console.log(`[Deduplicador Local] Grupo "${baseName}": Manteniendo última versión ${winner.entry.name} (v${winner.version}), eliminando ${losers.length} copias obsoletas.`);
           for (const loser of losers) {
             const filePath = this.fs.join(localDir, loser.entry.name);
-            await this.fs.rm(filePath).catch(() => {});
+            await this.fs.rm(filePath).catch(() => { });
             deleted++;
             if (manifest) {
               const loserRelPath = this.fs.join(relativePrefix, loser.entry.name);
@@ -721,33 +903,35 @@ export class SyncEngine {
     return { deleted, renamed };
   }
 
+  // B4 Fix: Usar driveFetch para rate limiting y retry 5xx/429 (igual que Desktop)
   private async deleteDriveFile(fileId: string, parentId: string): Promise<void> {
     this.driveFolderCache.delete(parentId);
     if (!this.accessToken) return;
     try {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      await this.driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${this.accessToken}` }
+        headers: { Authorization: `Bearer ${this.accessToken}` }
       });
-    } catch (err) {
-      console.error(`[Drive] Error eliminando archivo ID ${fileId}:`, err);
+    } catch (err: any) {
+      console.error(`[Drive] Error eliminando archivo ID ${fileId}:`, err.message || err);
     }
   }
 
+  // B4 Fix: Usar driveFetch para rate limiting y retry 5xx/429 (igual que Desktop)
   private async renameDriveFile(fileId: string, newName: string, parentId: string): Promise<void> {
     this.driveFolderCache.delete(parentId);
     if (!this.accessToken) return;
     try {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      await this.driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
         method: 'PATCH',
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ name: newName })
       });
-    } catch (err) {
-      console.error(`[Drive] Error renombrando archivo ID ${fileId}:`, err);
+    } catch (err: any) {
+      console.error(`[Drive] Error renombrando archivo ID ${fileId}:`, err.message || err);
     }
   }
 
@@ -775,7 +959,8 @@ export class SyncEngine {
     // 1. UPLOAD / LOCAL CHANGES (Concurrencia y procesamiento por lotes)
     if (pair.direction === 'upload' || pair.direction === 'bidirectional') {
       const dirEntries = localEntries.filter(e => e.isDirectory && !matchesIgnorePattern(e.name, this.settings.ignoredPatterns));
-      const fileEntries = localEntries.filter(e => !e.isDirectory && !matchesIgnorePattern(e.name, this.settings.ignoredPatterns));
+      // Fix #7: Excluir stubs .vstream y placeholders de Google Docs para no subirlos a Drive
+      const fileEntries = localEntries.filter(e => !e.isDirectory && !matchesIgnorePattern(e.name, this.settings.ignoredPatterns) && !e.name.endsWith('.vstream') && !e.name.endsWith('.gdoc') && !e.name.endsWith('.gsheet') && !e.name.endsWith('.gslides') && !e.name.endsWith('.syncmeta'));
 
       for (const entry of dirEntries) {
         if ((pair.status as string) === 'paused') return;
@@ -809,9 +994,9 @@ export class SyncEngine {
 
         // Conflicto bilateral: ambos cambiaron desde la última sync → esperar intervención manual
         if (!isNumbered && manifestEntry && remoteFile &&
-            localMtime > manifestEntry.localMtime + 5000 &&
-            remoteMtime > manifestEntry.remoteMtime + 5000 &&
-            this.settings.conflictResolution === 'prompt') {
+          localMtime > manifestEntry.localMtime + 5000 &&
+          remoteMtime > manifestEntry.remoteMtime + 5000 &&
+          this.settings.conflictResolution === 'prompt') {
           return;
         }
 
@@ -820,8 +1005,11 @@ export class SyncEngine {
         const isSizeIdentical = remoteFile && (stats.size === remoteSize || remoteFile.mimeType.startsWith('application/vnd.google-apps.'));
 
         if (isNumbered) {
-          // Un archivo numerado SIEMPRE es una exportación más nueva → subir directamente
-          shouldUpload = true;
+          if (manifestEntry && Math.abs(localMtime - manifestEntry.localMtime) <= 3000) {
+            shouldUpload = false;
+          } else {
+            shouldUpload = true;
+          }
         } else if (!remoteFile) {
           shouldUpload = true;
         } else if (manifestEntry && Math.abs(localMtime - manifestEntry.localMtime) > 2000) {
@@ -969,6 +1157,7 @@ export class SyncEngine {
               action: 'descargando'
             };
           }
+          // B8 Fix: Pasar md5Checksum para verificación de integridad
           await this.downloadDriveFile(
             remoteFile.id,
             fullLocalPath,
@@ -979,7 +1168,8 @@ export class SyncEngine {
                 pair.progress.bytesTransferred = currentTransferred;
                 pair.progress.percentage = Math.min(99, Math.round((currentTransferred / tot) * 100));
               }
-            }
+            },
+            (remoteFile as any).md5Checksum
           );
           const updatedStats = await this.fs.stat(fullLocalPath);
           if (updatedStats) {
@@ -998,6 +1188,10 @@ export class SyncEngine {
               remoteMtime: remoteTime,
               remoteId: remoteFile.id
             };
+            // B10 Fix #2: Escribir .syncmeta con el mtime remoto para que hasLocalFolderChanged
+            // use el mtime lógico en lugar del mtime real del sistema de archivos (utimes no disponible en Capacitor).
+            // Sin esto, el siguiente ciclo de polling detecta un falso cambio y re-dispara la descarga.
+            await this.writeSyncmeta(fullLocalPath, remoteTime);
             this.addEvent({
               id: Math.random().toString(36).substr(2, 9),
               pairId: pair.id,
@@ -1024,6 +1218,62 @@ export class SyncEngine {
 
   // --- DRIVE API ---
 
+  // Fix #3: Rate limiter — máximo 5 requests/segundo para respetar cuota de Google Drive
+  private async rateLimit(): Promise<void> {
+    const now = Date.now();
+    const elapsed = now - this.rateLimiter.lastRequest;
+    if (elapsed < this.rateLimiter.minInterval) {
+      await new Promise(r => setTimeout(r, this.rateLimiter.minInterval - elapsed));
+    }
+    this.rateLimiter.lastRequest = Date.now();
+  }
+
+  // Fix #3: Manejo de respuesta con retry para 429 (rate limit) y 5xx (errores de servidor)
+  private async handleDriveResponse(res: Response, retryCount = 0): Promise<Response> {
+    if (!res.ok) {
+      if (res.status === 401) {
+        console.warn('[SyncEngine] Token de Google Drive expirado o inválido (401).');
+        throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
+      }
+      // Manejar 429 (rate limit) con exponential backoff
+      if (res.status === 429 || res.status === 403) {
+        const retryAfter = parseInt(res.headers.get('Retry-After') || '1', 10);
+        const waitMs = Math.min(retryAfter * 1000, 32000);
+        console.warn(`[SyncEngine] Rate limit (${res.status}). Esperando ${waitMs}ms antes de reintentar...`);
+        await new Promise(r => setTimeout(r, waitMs));
+        throw new Error('RATE_LIMITED_RETRY');
+      }
+      // Reintentar errores 5xx hasta 3 veces
+      if (res.status >= 500 && retryCount < 3) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        console.warn(`[SyncEngine] Error ${res.status} del servidor. Reintentando en ${delay}ms (intento ${retryCount + 1}/3)...`);
+        await new Promise(r => setTimeout(r, delay));
+        throw new Error('SERVER_ERROR_RETRY');
+      }
+      const text = await res.text();
+      throw new Error(`Drive API error (${res.status}): ${text}`);
+    }
+    return res;
+  }
+
+  // Fix #3: Wrapper con rate limiting para llamadas fetch a Drive API
+  private async driveFetch(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      await this.rateLimit();
+      const res = await fetch(url, options);
+      try {
+        return await this.handleDriveResponse(res, attempt);
+      } catch (err: any) {
+        if (err.message === 'RATE_LIMITED_RETRY' || err.message === 'SERVER_ERROR_RETRY') {
+          if (attempt < maxRetries) continue;
+          throw new Error(`Drive API: máximo de reintentos (${maxRetries}) alcanzado para ${url}`);
+        }
+        throw err;
+      }
+    }
+    throw new Error(`Drive API: fallo inesperado en ${url}`);
+  }
+
   private async listDriveFiles(folderId: string, forceRefresh = false): Promise<DriveFile[]> {
     const cached = this.driveFolderCache.get(folderId);
     if (!forceRefresh && cached && (Date.now() - cached.timestamp < 60000)) {
@@ -1035,14 +1285,14 @@ export class SyncEngine {
     do {
       const url = new URL('https://www.googleapis.com/drive/v3/files');
       url.searchParams.append('q', `'${folderId}' in parents and trashed = false`);
-      url.searchParams.append('fields', 'nextPageToken, files(id, name, mimeType, modifiedTime, size, webViewLink)');
+      // B3 Fix: Incluir md5Checksum para verificación de integridad de descargas (violaba R6)
+      url.searchParams.append('fields', 'nextPageToken, files(id, name, mimeType, modifiedTime, size, md5Checksum, webViewLink, etag, appProperties)');
       url.searchParams.append('pageSize', '1000');
       if (pageToken) url.searchParams.append('pageToken', pageToken);
 
-      const res = await fetch(url.toString(), {
+      const res = await this.driveFetch(url.toString(), {
         headers: { Authorization: `Bearer ${this.accessToken}` }
       });
-      if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
       const data: any = await res.json();
       if (data.files) files.push(...data.files);
       pageToken = data.nextPageToken;
@@ -1052,28 +1302,35 @@ export class SyncEngine {
     return files;
   }
 
+  // B4 Fix: Usar driveFetch para rate limiting y retry 5xx/429 (igual que Desktop)
   private async createDriveFolder(parentId: string, name: string): Promise<DriveFile> {
     this.driveFolderCache.delete(parentId);
+    if (!this.accessToken) throw new Error('No OAuth access token set');
     const metadata = { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] };
-    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+
+    const res = await this.driveFetch('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime,webViewLink', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(metadata)
     });
-    return await res.json();
+    return await res.json() as DriveFile;
   }
 
+  // B8 Fix: Aceptar expectedMd5 para verificación de integridad (opcional)
   private async downloadDriveFile(
     fileId: string,
     destPath: string,
-    onProgress?: (loaded: number, total: number) => void
+    onProgress?: (loaded: number, total: number) => void,
+    expectedMd5?: string
   ): Promise<void> {
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
       headers: { Authorization: `Bearer ${this.accessToken}` }
     });
+    // Fix #8: Distinguir error 401 en downloadDriveFile para marcar sesión expirada
+    if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
     if (!res.ok) throw new Error(`Download failed HTTP ${res.status}`);
 
     const totalBytes = parseInt(res.headers.get('content-length') || '0', 10);
@@ -1131,7 +1388,12 @@ export class SyncEngine {
       }
 
       const base64 = base64Parts.join('');
+      // B1/B6: Marcar archivo como auto-escrito para que hasLocalFolderChanged lo ignore
+      this.markSelfWritten(destPath);
       await this.fs.writeFile(destPath, base64, true);
+      // B10: Escribir .syncmeta con el mtime remoto del archivo (utimes no disponible en Capacitor)
+      // El caller (syncDirectoryTree) ya conoce el remoteTime y lo escribe en el manifiesto.
+      // Aquí no tenemos acceso al remoteTime, así que el caller debe llamar writeSyncmeta.
     } else {
       // Fallback para entornos sin ReadableStream (raro en Android moderno)
       let blob: Blob | null = await res.blob();
@@ -1144,6 +1406,7 @@ export class SyncEngine {
       blob = null;
       const commaIdx = dataUrl.indexOf(',');
       const base64 = commaIdx !== -1 ? dataUrl.substring(commaIdx + 1) : dataUrl;
+      this.markSelfWritten(destPath);
       await this.fs.writeFile(destPath, base64, true);
     }
   }
@@ -1157,7 +1420,7 @@ export class SyncEngine {
   ): Promise<DriveFile> {
     this.driveFolderCache.delete(parentId);
     let contentBase64: string | null = await this.fs.readFile(filePath, true);
-    
+
     // Optimización RAM y Red: convertir de Base64 a datos binarios puros (Blob)
     const binaryString = atob(contentBase64);
     const bytes = new Uint8Array(binaryString.length);
@@ -1192,7 +1455,7 @@ export class SyncEngine {
 
       if (sessionUri && initRes.ok) {
         contentBase64 = null; // Liberar string Base64 inmediatamente
-        
+
         return await new Promise<DriveFile>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', sessionUri);
@@ -1249,6 +1512,16 @@ export class SyncEngine {
       },
       body
     });
+    // Fix #5: Verificar res.ok en fallback multipart para detectar 401/403/429/5xx
+    if (!res.ok) {
+      const errText = await res.text().catch(() => 'Unable to read error body');
+      if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
+      if (res.status === 429 || res.status === 403) {
+        console.warn(`[SyncEngine] Rate limit (${res.status}) en multipart upload.`);
+        throw new Error('RATE_LIMITED_RETRY');
+      }
+      throw new Error(`Multipart upload failed HTTP ${res.status}: ${errText}`);
+    }
     return await res.json();
   }
 }

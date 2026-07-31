@@ -19,6 +19,54 @@ export interface FileGroupItem {
   [key: string]: any;
 }
 
+// --- Constantes centralizadas de rutas (evitan hardcoded paths dispersos) ---
+/** Nombre base de la carpeta local de apuntes sincronizados */
+export const DEFAULT_LOCAL_DIR_NAME = 'Apuntes_Tablet_StarNote';
+/** Ruta remota por defecto en Google Drive */
+export const DEFAULT_REMOTE_PATH = 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote';
+/** Ruta base de StarNote en Android */
+export const ANDROID_STARNOTE_BASE = '/storage/emulated/0/Documents/StarNote';
+/** Subcarpeta de exportación de StarNote en Android */
+export const ANDROID_STARNOTE_EXPORT = '/storage/emulated/0/Documents/StarNote/export';
+
+export interface RemoteEntry {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime: string;
+  size?: string;
+  md5Checksum?: string;
+  etag?: string;
+  appProperties?: Record<string, string>;
+}
+
+export interface SyncPlan {
+  uploads: Array<{
+    localPath: string;
+    remoteName: string;
+    remoteId?: string;
+    vectorClock: string;
+  }>;
+  downloads: Array<{
+    remoteFile: RemoteEntry;
+    localPath: string;
+    vectorClock: string;
+  }>;
+  deleteLocal: Array<{
+    localPath: string;
+    remoteId?: string;
+  }>;
+  deleteRemote: Array<{
+    remoteId: string;
+  }>;
+  conflicts: Array<{
+    localPath: string;
+    remoteFile: RemoteEntry;
+    localVc: string;
+    remoteVc: string;
+  }>;
+}
+
 export class CoreSyncLogic {
   /**
    * Patrones de exclusión por defecto para archivos temporales, ocultos y bloqueos de edición
@@ -112,12 +160,12 @@ export class CoreSyncLogic {
 
     for (const [_, versions] of groups.entries()) {
       versions.sort((a, b) => {
+        // Orden descendente por mtime (más reciente primero).
         const timeDiff = b.mtime - a.mtime;
-        // Si la diferencia de modificación es significativa (> 2000ms), prevalece la marca temporal
-        if (Math.abs(timeDiff) > 2000) {
-          return timeDiff;
-        }
-        // De lo contrario, prevalece la copia con mayor numeración
+        // Si hay diferencia de timestamp, prevalece el mtime (siempre).
+        if (timeDiff !== 0) return timeDiff;
+        // Desempate: si timestamps son exactamente iguales (writes en cadena),
+        // gana la versión con mayor número de exportación.
         return b.version - a.version;
       });
     }
@@ -131,19 +179,179 @@ export class CoreSyncLogic {
    */
   public static normalizeRemotePath(remotePath: string | undefined): string {
     if (!remotePath) {
-      return 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote';
+      return DEFAULT_REMOTE_PATH;
     }
     let norm = remotePath.replace(/^(RemoteServer|Drive):/, 'GoogleDrive:');
     if (!norm.startsWith('GoogleDrive:')) {
       norm = 'GoogleDrive:' + (norm.startsWith('/') ? norm : '/' + norm);
     }
-    // Convertir rutas antiguas como /Documentos-Ubuntu/ o /Apuntes en pdf - tablet
     if (norm.includes('Documentos-Ubuntu') && !norm.includes('Documentos-Ubuntu-Fayfer')) {
       norm = norm.replace('Documentos-Ubuntu', 'Documentos-Ubuntu-Fayfer');
     }
     if (norm.includes('Apuntes en pdf - tablet')) {
-      norm = 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote';
+      norm = DEFAULT_REMOTE_PATH;
     }
     return norm;
+  }
+
+  /**
+   * THREE-WAY MERGE: Computa el plan de sincronización comparando
+   * Local vs Remote vs Estado Base (DB).
+   *
+   * FUNCIÓN PURA: sin I/O, sin DB, sin Drive. 100% testeable.
+   *
+   * @param localSnapshot  Mapa de archivos locales (mutado post-dedup)
+   * @param remoteSnapshot Mapa de archivos remotos (mutado post-dedup)
+   * @param dbState        Estado base desde SQLite
+   * @param deviceId       UUID del dispositivo actual
+   */
+  public static computeSyncPlan(
+    localSnapshot: ReadonlyMap<string, { name: string; mtime: number; size: number }>,
+    remoteSnapshot: ReadonlyMap<string, RemoteEntry>,
+    dbState: ReadonlyMap<string, { localMtime: number; remoteMtime: number; remoteId: string; fileSize: number }>,
+    deviceId: string
+  ): SyncPlan {
+    const plan: SyncPlan = {
+      uploads: [],
+      downloads: [],
+      deleteLocal: [],
+      deleteRemote: [],
+      conflicts: []
+    };
+
+    // Índice case-insensitive para Drive
+    const remoteByLowerName = new Map<string, RemoteEntry>();
+    for (const [_, entry] of remoteSnapshot) {
+      remoteByLowerName.set(entry.name.toLowerCase(), entry);
+    }
+
+    // Índice case-insensitive para local
+    const localByLowerName = new Map<string, { name: string; mtime: number; size: number }>();
+    for (const [relPath, entry] of localSnapshot) {
+      localByLowerName.set(entry.name.toLowerCase(), entry);
+    }
+
+    const processedRemotes = new Set<string>();
+
+    // Procesar archivos locales
+    for (const [relPath, localEntry] of localSnapshot) {
+      const lowerName = localEntry.name.toLowerCase();
+      const dbEntry = dbState.get(relPath);
+      const remoteEntry = remoteByLowerName.get(lowerName);
+
+      if (remoteEntry) processedRemotes.add(lowerName);
+
+      if (!dbEntry) {
+        // Nuevo archivo local — subir
+        plan.uploads.push({
+          localPath: relPath,
+          remoteName: localEntry.name,
+          remoteId: remoteEntry?.id,
+          vectorClock: JSON.stringify({ [deviceId]: 1 })
+        });
+        continue;
+      }
+
+      // Archivo ya conocido — ¿cambió?
+      const mtimeChanged = Math.abs(localEntry.mtime - dbEntry.localMtime) > 3000;
+      const sizeChanged = dbEntry.fileSize !== null && localEntry.size !== dbEntry.fileSize;
+
+      if (!mtimeChanged && !sizeChanged) {
+        continue; // Sin cambios
+      }
+
+      if (remoteEntry) {
+        // Existe en ambos lados — three-way merge
+        const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
+        const remoteChanged = Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000;
+
+        if (remoteChanged) {
+          // Ambos cambiaron — conflicto legítimo
+          plan.conflicts.push({
+            localPath: relPath,
+            remoteFile: remoteEntry,
+            localVc: JSON.stringify({ [deviceId]: 1 }),
+            remoteVc: JSON.stringify({ remote: 1 })
+          });
+        } else {
+          // Solo local cambió — upload
+          plan.uploads.push({
+            localPath: relPath,
+            remoteName: localEntry.name,
+            remoteId: dbEntry.remoteId,
+            vectorClock: JSON.stringify({ [deviceId]: (JSON.parse(dbEntry.remoteId ? '{}' : '{"' + deviceId + '":0}')[deviceId] || 0) + 1 })
+          });
+        }
+      } else {
+        // Solo existe localmente — upload
+        plan.uploads.push({
+          localPath: relPath,
+          remoteName: localEntry.name,
+          remoteId: dbEntry.remoteId,
+          vectorClock: JSON.stringify({ [deviceId]: 1 })
+        });
+      }
+    }
+
+    // Procesar archivos remotos no cubiertos por el loop local
+    for (const [_, remoteEntry] of remoteSnapshot) {
+      const lowerName = remoteEntry.name.toLowerCase();
+      if (processedRemotes.has(lowerName)) continue;
+
+      const localEntry = localByLowerName.get(lowerName);
+      const dbEntry = Array.from(dbState.entries()).find(([k, v]) => k.toLowerCase() === lowerName)?.[1];
+
+      if (!localEntry) {
+        if (!dbEntry || dbEntry.remoteId !== remoteEntry.id) {
+          // Nuevo archivo remoto — descargar
+          plan.downloads.push({
+            remoteFile: remoteEntry,
+            localPath: remoteEntry.name,
+            vectorClock: JSON.stringify({ remote: 1 })
+          });
+        }
+      }
+    }
+
+    // Detectar eliminaciones: en DB pero no en filesystem ni en remote
+    for (const [relPath, dbEntry] of dbState) {
+      if (!localSnapshot.has(relPath) && !Array.from(remoteSnapshot.values()).some(r => r.name.toLowerCase() === relPath.toLowerCase())) {
+        if (dbEntry.remoteId) {
+          plan.deleteRemote.push({ remoteId: dbEntry.remoteId });
+        } else {
+          plan.deleteLocal.push({ localPath: relPath });
+        }
+      }
+    }
+
+    return plan;
+  }
+
+  /**
+   * Merge de vector clocks para archivos sobrevivientes en deduplicación.
+   * Toma el MAX por cada dimensión de todos los clocks del grupo,
+   * luego incrementa el contador del dispositivo actual.
+   */
+  public static mergeClocksForDedup(
+    winnerVcStr: string,
+    loserVcStrs: string[],
+    deviceId: string
+  ): string {
+    const winner: Record<string, number> = JSON.parse(winnerVcStr || '{}');
+    const merged = { ...winner };
+
+    for (const loserStr of loserVcStrs) {
+      try {
+        const loser: Record<string, number> = JSON.parse(loserStr);
+        for (const [id, count] of Object.entries(loser)) {
+          merged[id] = Math.max(merged[id] || 0, count);
+        }
+      } catch { /* ignorar clocks corruptos */ }
+    }
+
+    // Incrementar nuestro contador porque ESTE dispositivo hizo el merge
+    merged[deviceId] = (merged[deviceId] || 0) + 1;
+
+    return JSON.stringify(merged);
   }
 }
