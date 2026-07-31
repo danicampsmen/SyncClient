@@ -221,14 +221,9 @@ async function openGoogleAuth() {
   });
 }
 
-ipcMain.handle('open-google-auth', async () => {
-  if (activeOAuthPromise) return activeOAuthPromise;
-  activeOAuthPromise = openGoogleAuth();
-  try {
-    return await activeOAuthPromise;
-  } finally {
-    activeOAuthPromise = null;
-  }
+// Abrir URLs en el navegador nativo del sistema operativo
+ipcMain.handle('openExternal', async (event, url) => {
+  await shell.openExternal(url);
 });
 
 ipcMain.handle('open-external', async (_event, url) => {

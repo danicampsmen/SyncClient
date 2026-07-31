@@ -60,6 +60,7 @@ export interface SyncPlan {
   }>;
   deleteRemote: Array<{
     remoteId: string;
+    localPath: string; // <-- AÑADIDO: Permite mostrar el nombre real en la interfaz
   }>;
   conflicts: Array<{
     localPath: string;
@@ -75,6 +76,7 @@ export interface SyncStateSnapshot {
   remoteId: string;
   fileSize: number | null;
   vectorClock?: string | null;
+  isTombstone?: boolean; // <-- AÑADIDO: Flag para identificar archivos borrados en Drive
 }
 
 export class CoreSyncLogic {
@@ -129,7 +131,6 @@ export class CoreSyncLogic {
   /**
    * Temporizador de estabilización de escritura (Settle Timer / Debounce Buffer).
    * Determina si un archivo ha terminado de guardarse antes de iniciar su transmisión por red.
-   * Por defecto exige 2000 ms (2 segundos) de inactividad de modificación sobre el disco.
    */
   public static isReadyForSync(mtimeMs: number, bufferMs: number = 2000, now?: number): boolean {
     if (!mtimeMs || mtimeMs <= 0) return true;
@@ -138,7 +139,7 @@ export class CoreSyncLogic {
   }
 
   /**
-   * Extrae información de numeración de archivos duplicados automáticos como "rotman(8).pdf" o "apuntes (1).txt".
+   * Extrae información de numeración de archivos duplicados automáticos como "rotman(8).pdf".
    */
   public static parseNumberedFilename(filename: string): NumberedFileInfo {
     const numberedMatch = filename.match(/^(.+?)(?:\s*\(\s*(\d+)\s*\))+\.([a-zA-Z0-9]+)$/);
@@ -153,8 +154,7 @@ export class CoreSyncLogic {
   }
 
   /**
-   * Agrupa una lista de archivos del sistema por su nombre base y los ordena
-   * situando al "ganador" en el índice 0 (mayor mtime con margen de 2s, o versión de número más alta).
+   * Agrupa archivos duplicados por nombre base y devuelve al "ganador" en la posición 0.
    */
   public static groupAndSortDuplicates<T extends FileGroupItem>(files: T[]): Map<string, Array<T & { version: number; baseName: string }>> {
     const groups = new Map<string, Array<T & { version: number; baseName: string }>>();
@@ -170,12 +170,8 @@ export class CoreSyncLogic {
 
     for (const [_, versions] of groups.entries()) {
       versions.sort((a, b) => {
-        // Orden descendente por mtime (más reciente primero).
         const timeDiff = b.mtime - a.mtime;
-        // Si hay diferencia de timestamp, prevalece el mtime (siempre).
         if (timeDiff !== 0) return timeDiff;
-        // Desempate: si timestamps son exactamente iguales (writes en cadena),
-        // gana la versión con mayor número de exportación.
         return b.version - a.version;
       });
     }
@@ -184,8 +180,7 @@ export class CoreSyncLogic {
   }
 
   /**
-   * Estandariza las rutas remotas de Google Drive a la jerarquía oficial:
-   * GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote
+   * Estandariza rutas de Drive a la jerarquía oficial.
    */
   public static normalizeRemotePath(remotePath: string | undefined): string {
     if (!remotePath) {
@@ -205,15 +200,8 @@ export class CoreSyncLogic {
   }
 
   /**
-   * THREE-WAY MERGE: Computa el plan de sincronización comparando
-   * Local vs Remote vs Estado Base (DB).
-   *
+   * THREE-WAY MERGE: Computa el plan de sincronización comparando Local vs Remote vs DB.
    * FUNCIÓN PURA: sin I/O, sin DB, sin Drive. 100% testeable.
-   *
-   * @param localSnapshot  Mapa de archivos locales (mutado post-dedup)
-   * @param remoteSnapshot Mapa de archivos remotos (mutado post-dedup)
-   * @param dbState        Estado base desde SQLite
-   * @param deviceId       UUID del dispositivo actual
    */
   public static computeSyncPlan(
     localSnapshot: ReadonlyMap<string, { name: string; mtime: number; size: number }>,
@@ -247,7 +235,7 @@ export class CoreSyncLogic {
     const remoteClock = (entry: RemoteEntry, fallback: VectorClock): VectorClock =>
       VectorClockManager.fromAppProperties(entry.appProperties || {}) || fallback;
 
-    // Procesar archivos locales
+    // 1. Procesar archivos locales (Cambios locales o conflictos)
     for (const [relPath, localEntry] of localSnapshot) {
       const lowerName = localEntry.name.toLowerCase();
       const dbEntry = dbState.get(relPath);
@@ -266,12 +254,12 @@ export class CoreSyncLogic {
         continue;
       }
 
-      // Archivo ya conocido — ¿cambió?
+      // Archivo ya conocido — ¿cambió localmente?
       const mtimeChanged = Math.abs(localEntry.mtime - dbEntry.localMtime) > 3000;
       const sizeChanged = dbEntry.fileSize !== null && localEntry.size !== dbEntry.fileSize;
 
       if (!mtimeChanged && !sizeChanged) {
-        // A remote-only change must not be hidden by the local snapshot loop.
+        // Si no cambió local, revisamos si cambió remoto
         if (remoteEntry) {
           const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
           if (Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000) {
@@ -283,11 +271,11 @@ export class CoreSyncLogic {
             });
           }
         }
-        continue; // Sin cambios
+        continue;
       }
 
       if (remoteEntry) {
-        // Existe en ambos lados — three-way merge
+        // Existe en ambos lados y cambió localmente — validamos si también cambió remotamente
         const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
         const remoteChanged = Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000;
 
@@ -312,7 +300,7 @@ export class CoreSyncLogic {
           });
         }
       } else {
-        // Solo existe localmente — upload
+        // Solo existe localmente pero ha sido modificado — upload (sobreescribiendo si aplica)
         plan.uploads.push({
           localPath: relPath,
           remoteName: localEntry.name,
@@ -322,7 +310,7 @@ export class CoreSyncLogic {
       }
     }
 
-    // Procesar archivos remotos no cubiertos por el loop local
+    // 2. Procesar archivos remotos no cubiertos por el loop local (Descargas)
     for (const [_, remoteEntry] of remoteSnapshot) {
       const lowerName = remoteEntry.name.toLowerCase();
       if (processedRemotes.has(lowerName)) continue;
@@ -342,7 +330,7 @@ export class CoreSyncLogic {
           remoteSize !== dbEntry!.fileSize;
 
         if (!dbEntry || dbEntry.remoteId !== remoteEntry.id || remoteChanged || sizeChanged) {
-          // Archivo remoto nuevo o actualizado — descargar
+          // Archivo remoto nuevo o actualizado remotamente — descargar
           plan.downloads.push({
             remoteFile: remoteEntry,
             localPath: remoteEntry.name,
@@ -352,13 +340,32 @@ export class CoreSyncLogic {
       }
     }
 
-    // Detectar eliminaciones: en DB pero no en filesystem ni en remote
+    // --- 3. Detectar Eliminaciones Cruzadas ---
     for (const [relPath, dbEntry] of dbState) {
-      if (!localSnapshot.has(relPath) && !Array.from(remoteSnapshot.values()).some(r => r.name.toLowerCase() === relPath.toLowerCase())) {
-        if (dbEntry.remoteId) {
-          plan.deleteRemote.push({ remoteId: dbEntry.remoteId });
-        } else {
+      const existsLocally = localSnapshot.has(relPath);
+
+      if (dbEntry.isTombstone) {
+        // El archivo fue borrado en Drive (confirmado por HTTP 404 o fase 0).
+        // Si aún existe físicamente en el PC, hay que borrarlo en el PC para mantener sincronía.
+        if (existsLocally) {
           plan.deleteLocal.push({ localPath: relPath });
+        }
+        continue;
+      }
+
+      if (!existsLocally) {
+        // El archivo desapareció físicamente del disco local (el usuario lo borró).
+
+        // Evitamos enviar orden de borrar en remoto si detectamos que justo
+        // ese mismo archivo está programado para descargarse (porque alguien lo editó online).
+        const isDownloading = plan.downloads.some(d => d.localPath.toLowerCase() === relPath.toLowerCase());
+
+        if (!isDownloading) {
+          if (dbEntry.remoteId) {
+            plan.deleteRemote.push({ remoteId: dbEntry.remoteId, localPath: relPath });
+          } else {
+            plan.deleteLocal.push({ localPath: relPath }); // Solo limpiar de la DB
+          }
         }
       }
     }
@@ -368,8 +375,6 @@ export class CoreSyncLogic {
 
   /**
    * Merge de vector clocks para archivos sobrevivientes en deduplicación.
-   * Toma el MAX por cada dimensión de todos los clocks del grupo,
-   * luego incrementa el contador del dispositivo actual.
    */
   public static mergeClocksForDedup(
     winnerVcStr: string,

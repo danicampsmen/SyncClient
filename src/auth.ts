@@ -1,15 +1,20 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, GoogleAuthProvider, onAuthStateChanged, User, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import {
+  getAuth, signInWithPopup, signInWithRedirect, getRedirectResult,
+  signInWithCredential, GoogleAuthProvider, onAuthStateChanged, User,
+  setPersistence, browserLocalPersistence
+} from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import firebaseConfig from '../firebase-applet-config.json';
 import { backendFetch, ensureBackendSession } from './services/backendSession';
+import { SecureStore } from './utils/secureStore';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Fix B: Persistencia de Firebase Auth para Capacitor — sobrevive reinicios de app en móvil
+// Persistencia de Firebase Auth (sobrevive reinicios de app)
 try {
   setPersistence(auth, browserLocalPersistence).catch((err) => {
     console.warn('[Auth] No se pudo configurar persistencia de Firebase:', err);
@@ -20,22 +25,52 @@ try {
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/drive');
-// B2 Fix: Solicitar access_type=offline + prompt=consent para obtener refresh_token
-// Sin access_type=offline, Google no devuelve refresh_token y el token expira en 1 hora
+// Solicitar access_type=offline + prompt=consent para obtener refresh_token
 provider.setCustomParameters({ access_type: 'offline', prompt: 'consent select_account' });
 
-let cachedAccessToken: string | null = localStorage.getItem('gdrive_access_token');
-// Fix A: Tracking de expiración del token para renovación automática
-let tokenExpiry: number = parseInt(localStorage.getItem('gdrive_token_expiry') || '0', 10);
-// B2 Fix: Almacenar refresh_token para renovación real de Google OAuth2
-let cachedRefreshToken: string | null = localStorage.getItem('gdrive_refresh_token');
+// Estado de tokens en memoria (se carga al inicio con loadTokensToMemory)
+let cachedAccessToken: string | null = null;
+let tokenExpiry: number = 0;
+let cachedRefreshToken: string | null = null;
 const TOKEN_REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // Renovar si faltan menos de 5 minutos
-// Google OAuth2 client ID (de la config de Firebase)
+
 const GOOGLE_CLIENT_ID = (firebaseConfig as any).oAuthClientId as string;
-// Guarda síncrona: previene ventanas OAuth duplicadas en Electron
 let isElectronOAuthInProgress = false;
 
+// --- Funciones de Almacenamiento Seguro (Asíncronas) ---
+
+export async function loadTokensToMemory(): Promise<void> {
+  cachedAccessToken = await SecureStore.get('gdrive_access_token');
+  cachedRefreshToken = await SecureStore.get('gdrive_refresh_token');
+  const expiryStr = await SecureStore.get('gdrive_token_expiry');
+  tokenExpiry = expiryStr ? parseInt(expiryStr, 10) : 0;
+}
+
+async function saveTokens(accessToken: string, refreshToken: string | null, expiresIn: number): Promise<void> {
+  cachedAccessToken = accessToken;
+  await SecureStore.set('gdrive_access_token', accessToken);
+
+  if (refreshToken) {
+    cachedRefreshToken = refreshToken;
+    await SecureStore.set('gdrive_refresh_token', refreshToken);
+  }
+
+  const expiry = Date.now() + (expiresIn - 300) * 1000; // 5 min de margen
+  tokenExpiry = expiry;
+  await SecureStore.set('gdrive_token_expiry', expiry.toString());
+}
+
+async function clearTokens(): Promise<void> {
+  cachedAccessToken = null;
+  cachedRefreshToken = null;
+  tokenExpiry = 0;
+  await SecureStore.remove('gdrive_access_token');
+  await SecureStore.remove('gdrive_token_expiry');
+  await SecureStore.remove('gdrive_refresh_token');
+}
+
 // --- PKCE Helpers para Authorization Code Flow ---
+
 function base64URLEncode(buffer: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < buffer.length; i++) {
@@ -60,7 +95,6 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
   return base64URLEncode(new Uint8Array(hash));
 }
 
-// Guarda estado PKCE en sessionStorage (se borra al cerrar la app)
 function savePKCEState(state: string, verifier: string): void {
   sessionStorage.setItem('pkce_state', state);
   sessionStorage.setItem('pkce_verifier', verifier);
@@ -71,11 +105,10 @@ function getPKCEVerifier(state: string): string | null {
   const savedVerifier = sessionStorage.getItem('pkce_verifier');
   sessionStorage.removeItem('pkce_state');
   sessionStorage.removeItem('pkce_verifier');
-  if (savedState !== state) return null; // CSRF protection
+  if (savedState !== state) return null; // Prevención CSRF
   return savedVerifier;
 }
 
-// Intercambia un authorization code por tokens (access_token + refresh_token)
 async function exchangeCodeForTokens(code: string, verifier: string, redirectUri: string): Promise<{ accessToken: string; refreshToken: string | null } | null> {
   try {
     const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -107,10 +140,11 @@ async function exchangeCodeForTokens(code: string, verifier: string, redirectUri
 
 /**
  * Renovación del Google Access Token usando refresh_token de Google OAuth2.
- * Si no hay refresh_token, intenta re-autenticar silenciosamente.
  */
 export const refreshAccessToken = async (): Promise<string | null> => {
-  // Intentar con refresh_token guardado
+  if (cachedRefreshToken === null) await loadTokensToMemory();
+
+  // 1. Intentar con refresh_token guardado
   if (cachedRefreshToken) {
     try {
       console.log('[Auth] Renovando Google Access Token vía refresh_token...');
@@ -127,7 +161,7 @@ export const refreshAccessToken = async (): Promise<string | null> => {
       if (res.ok) {
         const data = await res.json();
         if (data.access_token) {
-          saveTokens(data.access_token, data.refresh_token || cachedRefreshToken, data.expires_in || 3600);
+          await saveTokens(data.access_token, data.refresh_token || cachedRefreshToken, data.expires_in || 3600);
           console.log('[Auth] ✅ Token renovado exitosamente vía refresh_token.');
           return data.access_token;
         }
@@ -136,11 +170,9 @@ export const refreshAccessToken = async (): Promise<string | null> => {
         console.error('[Auth] Error renovando token vía OAuth2:', errData);
         if (errData.error === 'invalid_grant') {
           console.error('[Auth] Refresh token revocado o expirado. Se requiere re-autenticación completa.');
-          clearTokens();
+          await clearTokens();
           return null;
         }
-        cachedRefreshToken = null;
-        localStorage.removeItem('gdrive_refresh_token');
       }
     } catch (err: any) {
       console.error('[Auth] Error de red renovando token:', err?.message || err);
@@ -149,18 +181,18 @@ export const refreshAccessToken = async (): Promise<string | null> => {
 
   // Fallback: re-autenticar silenciosamente según plataforma
   try {
-    // Electron: usar bridge para re-autenticar
     const electronBridge = (window as any).electronBridge;
-    if (electronBridge?.isElectron && electronBridge?.openGoogleAuth) {
-      console.log('[Auth] Re-autenticando vía Electron bridge...');
-      const result = await electronBridge.openGoogleAuth();
-      if (result) {
-        const accessToken = typeof result === 'string' ? result : result.accessToken;
-        const refreshToken = typeof result === 'object' ? result.refreshToken : null;
-        if (accessToken) {
-          saveTokens(accessToken, refreshToken, 3600);
-          return accessToken;
-        }
+
+    // Electron: re-autenticar vía navegador externo
+    if (electronBridge?.isElectron && electronBridge?.openExternal) {
+      console.log('[Auth] Re-autenticando vía navegador externo...');
+      const authUrl = await buildMobileOAuthUrl();
+      await electronBridge.openExternal(authUrl);
+
+      const token = await pollBackendForToken();
+      if (token) {
+        await saveTokens(token, cachedRefreshToken, 3600);
+        return token;
       }
     }
 
@@ -170,7 +202,7 @@ export const refreshAccessToken = async (): Promise<string | null> => {
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
-        saveTokens(credential.accessToken, null, 3600);
+        await saveTokens(credential.accessToken, null, 3600);
         return credential.accessToken;
       }
     }
@@ -184,57 +216,31 @@ export const refreshAccessToken = async (): Promise<string | null> => {
 };
 
 /**
- * Guarda los tokens en localStorage
- */
-function saveTokens(accessToken: string, refreshToken: string | null, expiresIn: number): void {
-  cachedAccessToken = accessToken;
-  localStorage.setItem('gdrive_access_token', accessToken);
-  if (refreshToken) {
-    cachedRefreshToken = refreshToken;
-    localStorage.setItem('gdrive_refresh_token', refreshToken);
-  }
-  const expiry = Date.now() + (expiresIn - 300) * 1000; // 5 min de margen
-  tokenExpiry = expiry;
-  localStorage.setItem('gdrive_token_expiry', expiry.toString());
-}
-
-function clearTokens(): void {
-  cachedAccessToken = null;
-  cachedRefreshToken = null;
-  tokenExpiry = 0;
-  localStorage.removeItem('gdrive_access_token');
-  localStorage.removeItem('gdrive_token_expiry');
-  localStorage.removeItem('gdrive_refresh_token');
-}
-
-/**
  * Verifica si el token está próximo a expirar y lo renueva proactivamente.
  */
 export const ensureValidToken = async (): Promise<string | null> => {
+  if (cachedAccessToken === null) await loadTokensToMemory();
   const now = Date.now();
-  const token = cachedAccessToken || localStorage.getItem('gdrive_access_token');
-  const expiry = tokenExpiry || parseInt(localStorage.getItem('gdrive_token_expiry') || '0', 10);
 
-  if (!token) {
-    return null;
-  }
+  if (!cachedAccessToken) return null;
 
-  if (expiry === 0 || now > expiry - TOKEN_REFRESH_THRESHOLD_MS) {
+  if (tokenExpiry === 0 || now > tokenExpiry - TOKEN_REFRESH_THRESHOLD_MS) {
     console.log('[Auth] Token próximo a expirar, renovando...');
     const refreshed = await refreshAccessToken();
     if (refreshed) return refreshed;
-    return token; // devolver el actual aunque esté expirado, mejor que nada
+    return cachedAccessToken; // Devolver el actual aunque esté expirado (fallback final)
   }
 
-  return token;
+  return cachedAccessToken;
 };
 
-// Construye la URL de OAuth de Google con PKCE para móvil
+// Construye la URL de OAuth de Google con PKCE
 const buildMobileOAuthUrl = async (): Promise<string> => {
   const verifier = generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
   const state = base64URLEncode(crypto.getRandomValues(new Uint8Array(24)));
   savePKCEState(state, verifier);
+
   await ensureBackendSession();
   const prepared = await backendFetch('/api/oauth/prepare', {
     method: 'POST',
@@ -245,9 +251,8 @@ const buildMobileOAuthUrl = async (): Promise<string> => {
 
   const redirectUri = 'http://localhost:3000/api/oauth/callback';
   const scope = encodeURIComponent('https://www.googleapis.com/auth/drive profile email');
-  // P3: Si NO tenemos refresh_token, forzar solo "consent" para que Google lo emita.
-  // Si YA tenemos refresh_token, usar "select_account consent" para permitir cambiar cuenta.
   const promptValue = cachedRefreshToken ? 'select_account%20consent' : 'consent';
+
   return (
     `https://accounts.google.com/o/oauth2/v2/auth` +
     `?client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
@@ -262,44 +267,43 @@ const buildMobileOAuthUrl = async (): Promise<string> => {
   );
 };
 
-// Consulta al backend si ya capturó un token (polling cada 500ms)
+// Consulta al backend si ya capturó un token (polling)
 const pollBackendForToken = (): Promise<string | null> =>
   new Promise((resolve) => {
     let attempts = 0;
-    const maxAttempts = 120; // 1 minuto
+    const maxAttempts = 120; // 1 minuto (500ms * 120)
     const interval = setInterval(async () => {
       try {
         const res = await backendFetch('/api/oauth/token');
-        if (!res.ok) {
-          console.warn(`[Auth/Mobile] Servidor respondió con: ${res.status}`);
-          return;
-        }
+        if (!res.ok) return;
         const data = await res.json();
+
         if (data.code && data.state) {
           clearInterval(interval);
           const verifier = getPKCEVerifier(data.state);
           if (verifier) {
             const tokens = await exchangeCodeForTokens(data.code, verifier, 'http://localhost:3000/api/oauth/callback');
             if (tokens) {
-              resolve(tokens.accessToken);
               if (tokens.refreshToken) {
                 cachedRefreshToken = tokens.refreshToken;
-                localStorage.setItem('gdrive_refresh_token', tokens.refreshToken);
+                await SecureStore.set('gdrive_refresh_token', tokens.refreshToken);
               }
+              resolve(tokens.accessToken);
             } else {
               resolve(null);
             }
           } else {
-            console.error('[Auth/Mobile] PKCE state mismatch o expirado');
+            console.error('[Auth] PKCE state mismatch o expirado');
             resolve(null);
           }
         }
       } catch (err) {
-        console.warn('[Auth/Mobile] Error de conexión en polling:', err);
+        console.warn('[Auth] Error de conexión en polling:', err);
       }
+
       if (++attempts >= maxAttempts) {
         clearInterval(interval);
-        console.error('[Auth/Mobile] Timeout esperando token.');
+        console.error('[Auth] Timeout esperando token.');
         resolve(null);
       }
     }, 500);
@@ -310,16 +314,15 @@ export const initAuth = (
   onAuthFailure?: (error?: string) => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
+    await loadTokensToMemory();
+
     if (user) {
-      const token = cachedAccessToken || localStorage.getItem('gdrive_access_token');
-      if (token) {
-        cachedAccessToken = token;
+      if (cachedAccessToken) {
         const validToken = await ensureValidToken();
         if (validToken) {
-          cachedAccessToken = validToken;
           if (onAuthSuccess) onAuthSuccess(user, validToken);
         } else {
-          if (onAuthSuccess) onAuthSuccess(user, token);
+          if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
         }
       } else {
         const refreshed = await refreshAccessToken();
@@ -330,15 +333,13 @@ export const initAuth = (
         }
       }
     } else {
-      const storedToken = localStorage.getItem('gdrive_access_token');
-      if (!storedToken) {
-        cachedAccessToken = null;
+      if (!cachedAccessToken) {
         try {
           const redirectResult = await getRedirectResult(auth);
           if (redirectResult) {
             const credential = GoogleAuthProvider.credentialFromResult(redirectResult);
             if (credential?.accessToken) {
-              saveTokens(credential.accessToken, null, 3600);
+              await saveTokens(credential.accessToken, null, 3600);
               if (onAuthSuccess) onAuthSuccess(redirectResult.user, credential.accessToken);
               return;
             }
@@ -351,17 +352,16 @@ export const initAuth = (
         console.log('[Auth] Token existe pero Firebase no tiene usuario. Intentando restaurar sesión...');
         try {
           const validToken = await ensureValidToken();
-          if (!validToken) {
-            throw new Error('No se pudo renovar el token de acceso');
-          }
+          if (!validToken) throw new Error('No se pudo renovar el token de acceso');
+
           const credential = GoogleAuthProvider.credential(null, validToken);
           const result = await signInWithCredential(auth, credential);
           console.log('[Auth] ✅ Sesión restaurada con token almacenado.');
-          cachedAccessToken = validToken;
+
           if (onAuthSuccess) onAuthSuccess(result.user, validToken);
         } catch (err: any) {
           console.warn('[Auth] No se pudo restaurar sesión con token almacenado:', err?.message || err);
-          clearTokens();
+          await clearTokens();
           if (onAuthFailure) onAuthFailure('Sesión expirada. Inicia sesión de nuevo.');
         }
       }
@@ -370,40 +370,44 @@ export const initAuth = (
 };
 
 /**
- * Inicia sesión con Google. Usa el mejor método según la plataforma.
+ * Inicia sesión con Google usando PKCE en nativo/Electron y Popups en Web
  */
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string }> => {
+  await loadTokensToMemory();
   const electronBridge = (window as any).electronBridge;
 
-  // === RUTA ELECTRON ===
-  if (electronBridge?.isElectron && electronBridge?.openGoogleAuth) {
+  // === RUTA ELECTRON (PKCE vía Navegador Externo) ===
+  if (electronBridge?.isElectron && electronBridge?.openExternal) {
     if (isElectronOAuthInProgress) {
-      console.log('[Auth/Electron] OAuth ya en progreso. Ignorando llamada duplicada.');
-      throw new Error('OAuth ya en progreso. Espera a que se complete.');
+      console.log('[Auth/Electron] OAuth ya en progreso.');
+      throw new Error('OAuth en progreso. Completa el inicio de sesión en tu navegador.');
     }
     isElectronOAuthInProgress = true;
     try {
-      const result = await electronBridge.openGoogleAuth();
-      if (!result) throw new Error('No se obtuvo respuesta del flujo OAuth');
+      console.log('[Auth/Electron] Iniciando flujo OAuth con navegador externo (PKCE)...');
 
-      const accessToken = typeof result === 'string' ? result : result.accessToken;
-      const refreshToken = typeof result === 'object' ? result.refreshToken : null;
+      const authUrl = await buildMobileOAuthUrl();
+      await electronBridge.openExternal(authUrl);
 
-      if (!accessToken) throw new Error('No se pudo obtener el token de acceso de Google Drive');
+      const tokenOrCode = await pollBackendForToken();
+      if (!tokenOrCode) {
+        throw new Error('No se recibió token. ¿Cancelaste el inicio de sesión en el navegador?');
+      }
 
-      const credential = GoogleAuthProvider.credential(null, accessToken);
+      const credential = GoogleAuthProvider.credential(null, tokenOrCode);
       const firebaseResult = await signInWithCredential(auth, credential);
-      saveTokens(accessToken, refreshToken, 3600);
-      console.log('[Auth/Electron] Sesión iniciada con éxito.' + (refreshToken ? ' Refresh token disponible.' : ''));
-      return { user: firebaseResult.user, accessToken };
+
+      await saveTokens(tokenOrCode, cachedRefreshToken, 3600);
+      console.log('[Auth/Electron] Sesión iniciada con éxito.');
+      return { user: firebaseResult.user, accessToken: tokenOrCode };
     } finally {
       isElectronOAuthInProgress = false;
     }
   }
 
-  // === RUTA MÓVIL (Capacitor) ===
+  // === RUTA MÓVIL CAPACITOR (Chrome Custom Tab + PKCE) ===
   if (Capacitor.isNativePlatform()) {
-    console.log('[Auth/Mobile] Iniciando flujo OAuth con PKCE + Authorization Code...');
+    console.log('[Auth/Mobile] Iniciando flujo OAuth con PKCE...');
 
     try {
       await signInWithRedirect(auth, provider);
@@ -412,7 +416,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       if (e.message === 'REDIRECT_INITIATED') {
         throw new Error('Redirigiendo al navegador para autenticación...');
       }
-      console.log('[Auth/Mobile] signInWithRedirect no disponible, usando Chrome Custom Tab + relay...');
     }
 
     const authUrl = await buildMobileOAuthUrl();
@@ -437,7 +440,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
               const tokens = await exchangeCodeForTokens(code, verifier, 'http://localhost:3000/api/oauth/callback');
               if (tokens?.refreshToken) {
                 cachedRefreshToken = tokens.refreshToken;
-                localStorage.setItem('gdrive_refresh_token', tokens.refreshToken);
+                await SecureStore.set('gdrive_refresh_token', tokens.refreshToken);
               }
               resolve(tokens?.accessToken || null);
             } else {
@@ -459,26 +462,19 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       throw new Error('No se recibió token. ¿Completaste el inicio de sesión en el navegador?');
     }
 
-    try {
-      const credential = GoogleAuthProvider.credential(null, tokenOrCode);
-      const result = await signInWithCredential(auth, credential);
-      if (!tokenExpiry) {
-        const expiry = Date.now() + 55 * 60 * 1000;
-        tokenExpiry = expiry;
-        localStorage.setItem('gdrive_token_expiry', expiry.toString());
-      }
-      console.log('[Auth/Mobile] Sesión iniciada con éxito.');
-      return { user: result.user, accessToken: tokenOrCode };
-    } catch (e) {
-      throw e;
-    }
+    const credential = GoogleAuthProvider.credential(null, tokenOrCode);
+    const result = await signInWithCredential(auth, credential);
+    await saveTokens(tokenOrCode, cachedRefreshToken, 3600);
+    console.log('[Auth/Mobile] Sesión iniciada con éxito.');
+    return { user: result.user, accessToken: tokenOrCode };
   }
 
-  // === RUTA WEB (Desktop sin Electron) ===
+  // === RUTA WEB BÁSICA ===
   const result = await signInWithPopup(auth, provider);
   const credential = GoogleAuthProvider.credentialFromResult(result);
   if (!credential?.accessToken) throw new Error('No se pudo obtener el token de acceso de Google Drive');
-  saveTokens(credential.accessToken, null, 3600);
+
+  await saveTokens(credential.accessToken, null, 3600);
   return { user: result.user, accessToken: credential.accessToken };
 };
 
@@ -488,8 +484,7 @@ export const getAccessToken = async (): Promise<string | null> => {
 
 export const logout = async () => {
   await auth.signOut();
-  clearTokens();
+  await clearTokens();
 };
 
-// Tipo re-exportado para uso en SyncApp.tsx
 export type { User as UserProfile };
