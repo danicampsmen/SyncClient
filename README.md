@@ -12,12 +12,12 @@ SyncClient es un cliente de sincronización bidireccional entre **Google Drive**
 
 ## Características
 
-- ✅ Sincronización bidireccional (upload, download, bidirectional)
-- ✅ Deduplicación automática de exportaciones (StarNote, etc.)
-- ✅ Modo espejo (1:1 offline) y modo streaming (stubs virtuales)
-- ✅ Anti-bucle de sincronización para carpetas de 100GB+
-- ✅ Resolución de conflictos manual
-- ✅ Subida resumible (Resumable Upload) para archivos grandes
+- Soporte de sincronización upload, download y bidirectional en desarrollo
+- Deduplicación configurable de exportaciones (StarNote, etc.)
+- Modo espejo (1:1 offline) y modo streaming (stubs virtuales)
+- Protecciones anti-bucle para carpetas grandes
+- Resolución de conflictos manual en evolución
+- Subida resumible para archivos grandes
 - ✅ Autenticación con Google OAuth vía Firebase
 - ✅ Monitoreo de dispositivos de almacenamiento USB externos
 
@@ -136,17 +136,22 @@ SyncClient detecta automáticamente archivos numerados como `Nota(1).pdf`, `Nota
 
 ## Seguridad
 
-- CORS restringido a orígenes localhost
-- Token de acceso almacenado en `localStorage` (vulnerable a XSS — ver [issues](#known-issues))
+- CORS restringido a orígenes locales configurados
 - OAuth relay para dispositivos móviles sin navegador
 - Sesiones aisladas en Electron (partitioned sessions)
+- La migración completa de tokens a almacenamiento seguro de escritorio sigue
+  pendiente; no usar esta versión como producto de producción sin revisarla.
 
 ## Known Issues
 
-- El token de Google Drive se almacena en `localStorage`, vulnerable a XSS
-- `utimes` no implementado en CapacitorFS (afecta sincronización de mtime en Android)
-- `VFSBridge.readFile/writeFile` en modo desktop usan endpoints que pueden no existir
-- Código duplicado entre `src/backend/syncEngine.ts` y `src/services/SyncEngine.ts`
+- El almacenamiento seguro de tokens para Electron todavía está pendiente.
+- `utimes` no está implementado en CapacitorFS; Android usa sidecars `.syncmeta`.
+- `VFSBridge.readFile/writeFile` en modo desktop requiere verificación de endpoints.
+- La bisincronización incremental de Ubuntu con `changes.list` y cursores SQLite
+  está planificada, pero aún no se declara terminada.
+
+Para el plan técnico de Ubuntu, consulta
+[`docs/PLAN_BISINCRONIZACION_UBUNTU.md`](docs/PLAN_BISINCRONIZACION_UBUNTU.md).
 
 ## Licencia
 

@@ -28,11 +28,13 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 - El backoff adaptativo (30s → 60s → ... → 15min) debe respetarse.
 - **NUNCA debilitar estos mecanismos sin un reemplazo equivalente.**
 
-### R3: Sincronizar Ambos Motores (Desktop ↔ Android)
-- `src/backend/syncEngine.ts` (Desktop Linux, Node.js) — ~1621 líneas.
-- `src/services/SyncEngine.ts` (Android, Capacitor) — ~1296 líneas.
-- **TODO cambio en uno DEBE reflejarse en el otro.** Actualmente el motor Android carece de `selfWrittenFiles`, `syncBackoff`, `SYNC_COOLDOWN_MS` y `syncTriggerSource` — esto es un bug que causa bucles en Android.
-- Lógica compartida va en `src/shared/CoreSyncLogic.ts`. No duplicar.
+### R3: Consistencia entre motores
+- `src/backend/syncEngine.ts` es el motor de Ubuntu Desktop.
+- `src/services/SyncEngine.ts` es el motor nativo de Android.
+- Un cambio exclusivo de Ubuntu no debe modificar Android por rutina.
+- Todo cambio en contratos compartidos o en `src/shared/` debe revisarse en ambos
+  motores y cubrirse con pruebas de cada plataforma cuando sea posible.
+- Lógica común va en `src/shared/CoreSyncLogic.ts`; no duplicar reglas.
 
 ### R4: Tokens — Firebase ≠ Google Drive
 - `firebase.auth().getIdToken()` devuelve un **Firebase ID Token** (para Firebase services).
@@ -129,3 +131,11 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 | `npm run electron:dev` | Electron + backend simultáneos |
 | `npm run android:deploy` | Build + desplegar a Android + ADB reverse |
 | `npm run lint` | Verificar tipos TypeScript |
+
+## Alcance de trabajo para Ubuntu
+
+La bisincronización de Ubuntu se planifica y valida en
+[`docs/PLAN_BISINCRONIZACION_UBUNTU.md`](docs/PLAN_BISINCRONIZACION_UBUNTU.md).
+Priorizar cambios en `src/backend/`, `src/shared/`, SQLite y la integración de
+Google Drive. No implementar Android dentro de una tarea Ubuntu salvo que se
+solicite explícitamente una modificación compartida.
