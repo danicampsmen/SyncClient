@@ -63,6 +63,7 @@ export interface IStorageBackend {
     // Mantenimiento
     vacuum(): void;
     checkpoint(): Promise<void>;
+    close(): Promise<void>;
 }
 
 function rowToDriveCursor(row: any): DriveCursor {
@@ -176,6 +177,24 @@ export class SQLiteBackend implements IStorageBackend {
         } catch (e: any) {
             console.error('[SQLiteBackend] Init failed:', e.message || e);
             return false;
+        }
+    }
+
+    async close(): Promise<void> {
+        if (this.db) {
+            if (isCapacitor()) {
+                // sql.js (WASM)
+                await this.checkpoint(); // Guardar WAL a la base de datos principal
+                const data = this.db.export();
+                await this.fs.writeFile(this.dbPath, data);
+                this.db.close();
+                console.log('[SQLiteBackend/WASM] Database saved and closed.');
+            } else {
+                // better-sqlite3 (Nativo)
+                this.db.close();
+                console.log('[SQLiteBackend/Native] Database closed.');
+            }
+            this.db = null;
         }
     }
 
@@ -486,7 +505,7 @@ export class SQLiteBackend implements IStorageBackend {
             (pair_id, account_id, corpus_id, drive_id, page_token, last_success_at, status)
             VALUES (?, ?, ?, ?, ?, ?, ?)`;
         const params = [cursor.pair_id, cursor.account_id, cursor.corpus_id, cursor.drive_id,
-            cursor.page_token, cursor.last_success_at, cursor.status];
+        cursor.page_token, cursor.last_success_at, cursor.status];
         if (isCapacitor()) this.db.run(sql, params);
         else this.db.prepare(sql).run(...params);
     }
@@ -496,8 +515,8 @@ export class SQLiteBackend implements IStorageBackend {
             (id, pair_id, rel_path, operation_type, remote_id, status, attempts, last_error, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
         const params = [operation.id, operation.pair_id, operation.rel_path, operation.operation_type,
-            operation.remote_id, operation.status, operation.attempts, operation.last_error,
-            operation.created_at, operation.updated_at];
+        operation.remote_id, operation.status, operation.attempts, operation.last_error,
+        operation.created_at, operation.updated_at];
         if (isCapacitor()) this.db.run(sql, params);
         else this.db.prepare(sql).run(...params);
     }
@@ -526,7 +545,7 @@ export class SQLiteBackend implements IStorageBackend {
             (operation_id, remote_id, session_uri, file_size, confirmed_offset, chunk_size, source_hash, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
         const params = [session.operation_id, session.remote_id, session.session_uri, session.file_size,
-            session.confirmed_offset, session.chunk_size, session.source_hash, session.updated_at];
+        session.confirmed_offset, session.chunk_size, session.source_hash, session.updated_at];
         if (isCapacitor()) this.db.run(sql, params);
         else this.db.prepare(sql).run(...params);
     }
@@ -547,7 +566,7 @@ export class SQLiteBackend implements IStorageBackend {
             (id, pair_id, rel_path, local_hash, remote_hash, base_hash, resolution, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
         const params = [conflict.id, conflict.pair_id, conflict.rel_path, conflict.local_hash,
-            conflict.remote_hash, conflict.base_hash, conflict.resolution, conflict.created_at];
+        conflict.remote_hash, conflict.base_hash, conflict.resolution, conflict.created_at];
         if (isCapacitor()) this.db.run(sql, params);
         else this.db.prepare(sql).run(...params);
     }

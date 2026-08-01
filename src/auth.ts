@@ -37,8 +37,11 @@ const TOKEN_REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // Renovar si faltan menos de 
 
 const GOOGLE_CLIENT_ID = (firebaseConfig as any).oAuthClientId as string;
 const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET
-  || import.meta.env.VITE_FIREBASE_CLIENT_SECRET
-  || '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';
+  || import.meta.env.VITE_FIREBASE_CLIENT_SECRET;
+
+if (!GOOGLE_CLIENT_SECRET) {
+  console.warn('[Auth] VITE_GOOGLE_CLIENT_SECRET no está configurado. La re-autenticación puede fallar.');
+}
 
 let isElectronOAuthInProgress = false;
 

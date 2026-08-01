@@ -522,7 +522,7 @@ export class SyncEngine {
       else if ((pair.status as string) !== 'paused') pair.status = 'error';
       pair.progress = null;
       await this.saveState();
-    } finally {
+     } finally {
       this.activeSyncs.delete(pairId);
       this.driveFolderCache.clear();
 
@@ -530,7 +530,9 @@ export class SyncEngine {
       const filesProcessed = pair.progress?.currentFileIndex ?? 0;
       const bytesTransferred = pair.progress?.bytesTransferred ?? 0;
 
-      if (filesProcessed === 0 && bytesTransferred === 0) {
+      // Increment backoff on errors or zero progress to prevent rapid retries
+      // (R9: adaptive backoff 30s → 60s → ... → 15min)
+      if (filesProcessed === 0 && bytesTransferred === 0 || pair.status === 'error') {
         const currentBackoff = this.syncBackoff[pairId] || this.INITIAL_POLL_MS;
         this.syncBackoff[pairId] = Math.min(currentBackoff * 2, this.MAX_POLL_INTERVAL_MS);
       } else {

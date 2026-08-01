@@ -43,6 +43,14 @@ describe('CoreSyncLogic.matchesIgnorePattern', () => {
     expect(CoreSyncLogic.matchesIgnorePattern('documento.pdf', [])).toBe(false);
     expect(CoreSyncLogic.matchesIgnorePattern('file.txt', [''])).toBe(false);
   });
+
+  it('handles edge cases for numeric and hidden files', () => {
+    expect(CoreSyncLogic.matchesIgnorePattern('.hidden.tmp')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('..notadir')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('test~')).toBe(true);
+    expect(CoreSyncLogic.matchesIgnorePattern('backup#1#')).toBe(false);
+    expect(CoreSyncLogic.matchesIgnorePattern('C:\\path\\test.txt')).toBe(false);
+  });
 });
 
 describe('CoreSyncLogic.parseNumberedFilename', () => {
@@ -64,6 +72,16 @@ describe('CoreSyncLogic.parseNumberedFilename', () => {
       version: 0,
       extension: '',
     });
+  });
+
+  it.each([
+    ['', { isNumbered: false, baseName: '', version: 0, extension: '' }],
+    ['(1).pdf', { isNumbered: false, baseName: '(1).pdf', version: 0, extension: 'pdf' }],
+    ['archivo(0).pdf', { isNumbered: true, baseName: 'archivo.pdf', version: 0, extension: 'pdf' }],
+    ['file.tar.gz', { isNumbered: false, baseName: 'file.tar.gz', version: 0, extension: 'gz' }],
+    ['nota (1) (2).pdf', { isNumbered: true, baseName: 'nota.pdf', version: 2, extension: 'pdf' }],
+  ])('parses StarNote format edge cases %s', (filename, expected) => {
+    expect(CoreSyncLogic.parseNumberedFilename(filename)).toEqual(expected);
   });
 });
 
@@ -158,6 +176,50 @@ describe('CoreSyncLogic.groupAndSortDuplicates', () => {
 
   it('returns an empty map for an empty input', () => {
     expect(CoreSyncLogic.groupAndSortDuplicates([])).toEqual(new Map());
+  });
+
+  it('groups files with same base name regardless of case variant (separate groups)', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'NOTA.PDF', mtime: 1000 },
+      { name: 'nota.pdf', mtime: 2000 },
+    ]);
+
+    expect(groups.size).toBe(2);
+    expect(groups.get('NOTA.PDF')?.[0]).toMatchObject({
+      name: 'NOTA.PDF',
+      version: 0,
+    });
+    expect(groups.get('nota.pdf')?.[0]).toMatchObject({
+      name: 'nota.pdf',
+      version: 0,
+    });
+  });
+
+  it('groups numbered files without spaces', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'nota(1).pdf', mtime: 1000 },
+      { name: 'nota(2).pdf', mtime: 2000 },
+      { name: 'nota(3).pdf', mtime: 2500 },
+      { name: 'nota.pdf', mtime: 3000 },
+    ]);
+
+    expect(groups.size).toBe(1);
+    expect(groups.get('nota.pdf')?.[0]).toMatchObject({
+      name: 'nota.pdf',
+      version: 0,
+    });
+  });
+
+  it('handles single file with no duplicates', () => {
+    const groups = CoreSyncLogic.groupAndSortDuplicates([
+      { name: 'unique.pdf', mtime: 1000 },
+    ]);
+
+    expect(groups.size).toBe(1);
+    expect(groups.get('unique.pdf')?.[0]).toMatchObject({
+      name: 'unique.pdf',
+      version: 0,
+    });
   });
 });
 
@@ -349,5 +411,139 @@ describe('CoreSyncLogic.mergeClocksForDedup', () => {
   it('increments the winner device even without losers', () => {
     expect(CoreSyncLogic.mergeClocksForDedup('{"device-a":3}', [], 'device-a'))
       .toBe('{"device-a":4}');
+  });
+});
+
+describe('CoreSyncLogic.computeSyncPlan - conflict edge cases', () => {
+  const remoteFile = (overrides: Partial<RemoteEntry> = {}): RemoteEntry => ({
+    id: 'remote-1',
+    name: 'nota.pdf',
+    mimeType: 'application/pdf',
+    modifiedTime: '1970-01-01T00:00:10.000Z',
+    size: '100',
+    ...overrides,
+  });
+
+  const dbFile = (overrides: Partial<{ localMtime: number; remoteMtime: number; remoteId: string; fileSize: number; baseHash: string | null; vectorClock: string | null; isTombstone: boolean }> = {}) => ({
+    localMtime: 10_000,
+    remoteMtime: 10_000,
+    remoteId: 'remote-1',
+    fileSize: 100,
+    baseHash: null,
+    vectorClock: null,
+    isTombstone: false,
+    ...overrides,
+  });
+
+  it('detects conflict when local and remote mtimes are exactly equal but content differs via hash', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 10_000, size: 100, hash: 'local-hash' }]]),
+      new Map([['nota.pdf', remoteFile({ md5Checksum: 'remote-hash' })]]),
+      new Map([['nota.pdf', dbFile({ baseHash: 'base-hash', remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.conflicts[0]).toMatchObject({
+      localPath: 'nota.pdf',
+      reason: 'both_modified',
+      localHash: 'local-hash',
+      remoteHash: 'remote-hash',
+      baseHash: 'base-hash',
+    });
+  });
+
+  it('detects conflict when both sides changed by exactly the threshold (3000ms)', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 13_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:13.000Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    // At exactly 3000ms difference, it should NOT report conflict
+    expect(plan.conflicts).toHaveLength(0);
+  });
+
+  it('reports conflict when both sides changed beyond threshold even if local mtime equals remote mtime', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 14_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:14.000Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    expect(plan.conflicts).toHaveLength(1);
+  });
+
+  it('handles tombstone correctly - local file exists but DB marks remote as deleted', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 10_000, size: 100 }]]),
+      new Map(),
+      new Map([['nota.pdf', dbFile({ isTombstone: true, remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    expect(plan.deleteLocal).toHaveLength(1);
+    expect(plan.deleteLocal[0]).toMatchObject({ localPath: 'nota.pdf' });
+    expect(plan.conflicts).toHaveLength(0);
+  });
+
+  it('does not delete remote when local file missing and remote changed (delete_vs_modify conflict)', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map(),
+      new Map([['nota.pdf', remoteFile({
+        modifiedTime: '1970-01-01T00:00:20.000Z',
+        md5Checksum: 'remote-hash',
+        size: '200',
+      })]]),
+      new Map([['nota.pdf', dbFile({
+        baseHash: 'base-hash',
+        remoteMtime: 10_000,
+        fileSize: 100,
+      })]]),
+      'device-a',
+    );
+
+    expect(plan.deleteRemote).toHaveLength(0);
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.conflicts[0].reason).toBe('delete_vs_modify');
+  });
+
+  it('resolves conflict with mtime combinations: older local wins when remote not changed', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 13_001, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:10.000Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    expect(plan.uploads).toHaveLength(1);
+    expect(plan.conflicts).toHaveLength(0);
+  });
+
+  it('resolves conflict with mtime combinations: newer remote wins when local not changed', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 10_000, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:13.001Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    expect(plan.downloads).toHaveLength(1);
+    expect(plan.conflicts).toHaveLength(0);
+  });
+
+  it('detects conflict with mtime combinations: both changed beyond threshold', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 13_001, size: 100 }]]),
+      new Map([['nota.pdf', remoteFile({ modifiedTime: '1970-01-01T00:00:13.001Z' })]]),
+      new Map([['nota.pdf', dbFile({ remoteMtime: 10_000 })]]),
+      'device-a',
+    );
+
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.uploads).toHaveLength(0);
+    expect(plan.downloads).toHaveLength(0);
   });
 });

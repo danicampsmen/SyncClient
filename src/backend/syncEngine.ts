@@ -6,7 +6,7 @@ import os from 'os';
 import { Readable } from 'stream';
 import chokidar, { FSWatcher } from 'chokidar';
 import { SyncPair, SyncEvent, SyncSettings, PendingConflict, ExternalDriveAlert } from '../types';
-import { CoreSyncLogic, RemoteEntry, SyncPlan, SyncStateSnapshot } from '../shared/CoreSyncLogic';
+import { CoreSyncLogic, RemoteEntry, SyncPlan, SyncStateSnapshot, DEFAULT_REMOTE_PATH } from '../shared/CoreSyncLogic';
 import { USE_V2_SYNC, FileState, SyncJournalEntry, DriveCursor } from '../shared/schema';
 import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
@@ -15,6 +15,7 @@ import { scanChanges, computeBlockHashes, lazyHashBatch, isMtimeChanged, hasCont
 import { downloadToAtomicFile, requestTransfer, RESUMABLE_UPLOAD_THRESHOLD, uploadResumableFile, type TransferHttpClient } from './transfer';
 import { acquirePairLock, PairAlreadyRunningError, type PairLock } from './pairProcessLock';
 import { DriveChangesIngestor, DriveCursorRescanRequiredError, type DriveChange } from './driveChanges';
+import { SecureStore } from '../utils/secureStore';
 import {
   INITIAL_POLL_INTERVAL_MS,
   SYNC_DEBOUNCE_MS,
@@ -268,16 +269,12 @@ export class SyncEngine {
       if (this.pairs.length > 0) {
         let modified = false;
         this.pairs.forEach(p => {
-          if (p.localPath === '/home/fayfer/Documentos/Apuntes en pdf - tablet' || p.localPath.includes('Apuntes en pdf - tablet')) {
-            p.localPath = path.join(os.homedir(), 'Documentos', 'Apuntes_Tablet_StarNote');
-            modified = true;
-          }
           if (p.localPath.startsWith('~/')) {
             p.localPath = path.join(os.homedir(), p.localPath.slice(2));
             modified = true;
           }
           if (p.remotePath === 'GoogleDrive:/Apuntes_Tablet_StarNote' || p.remotePath === 'GoogleDrive:Apuntes en pdf - tablet' || p.remotePath === 'GoogleDrive:/Apuntes en pdf - tablet' || p.remotePath === 'GoogleDrive:Apuntes_Tablet_StarNote' || p.remotePath === 'GoogleDrive:/Documentos-Ubuntu/Apuntes_Tablet_StarNote') {
-            p.remotePath = 'GoogleDrive:/Documentos-Ubuntu-Fayfer/Apuntes_Tablet_StarNote';
+            p.remotePath = DEFAULT_REMOTE_PATH;
             modified = true;
           }
         });
@@ -470,22 +467,54 @@ export class SyncEngine {
     }
   }
 
+  // --- Token Persistence ---
+  private async saveTokens(accessToken: string | null, refreshToken: string | null): Promise<void> {
+    try {
+      if (accessToken) {
+        await SecureStore.set('gdrive_access_token', accessToken);
+      } else {
+        await SecureStore.remove('gdrive_access_token');
+      }
+      if (refreshToken) {
+        await SecureStore.set('gdrive_refresh_token', refreshToken);
+      } else {
+        await SecureStore.remove('gdrive_refresh_token');
+      }
+    } catch (err) {
+      console.warn('[SyncEngine/Auth] Could not persist tokens to secure store:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   private async refreshAccessToken(): Promise<boolean> {
     if (!this.refreshToken) return false;
     try {
       const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: this.googleClientId || '', refresh_token: this.refreshToken, grant_type: 'refresh_token' }).toString(),
+        body: new URLSearchParams({
+          client_id: this.googleClientId || '',
+          client_secret: import.meta.env.VITE_GOOGLE_CLIENT_SECRET || '',
+          refresh_token: this.refreshToken,
+          grant_type: 'refresh_token',
+        }).toString(),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        if (errData.error === 'invalid_grant') this.refreshToken = null;
+        if (errData.error === 'invalid_grant') {
+          this.refreshToken = null;
+          await this.saveTokens(null, null);
+        }
         return false;
       }
       const data = await res.json();
       if (data.access_token) {
         this.accessToken = data.access_token;
-        if (data.refresh_token) this.refreshToken = data.refresh_token;
+        // Persistir refresh_token rotado por Google (si es diferente)
+        if (data.refresh_token) {
+          this.refreshToken = data.refresh_token;
+          await this.saveTokens(data.access_token, data.refresh_token);
+        } else {
+          await this.saveTokens(data.access_token, this.refreshToken);
+        }
         return true;
       }
       return false;
@@ -899,7 +928,7 @@ export class SyncEngine {
         bytesTransferred: finalBytesTransferred, totalBytes: finalTotalBytes > 0 ? finalTotalBytes : finalBytesTransferred,
         percentage: 100, action: 'completado'
       };
-      
+
       setTimeout(() => { if (pair && pair.status === 'idle') { pair.progress = null; this.saveState(); } }, 4000);
       await this.saveState();
     } catch (err: unknown) {
@@ -927,16 +956,20 @@ export class SyncEngine {
         }
       }
       this.activeSyncs.delete(pairId);
-      if (!this.isDriveChangesEnabled()) {
-        this.driveFolderCache.clear();
-        this.driveChangesCacheReady.delete(pairId);
-      }
+      this.driveFolderCache.clear();
+      this.driveChangesCacheReady.delete(pairId);
 
       this.lastSyncCompleted[pairId] = Date.now();
       const filesProcessed = pair.progress?.currentFileIndex ?? 0;
       const bytesTransferred = pair.progress?.bytesTransferred ?? 0;
 
+      // Increment backoff regardless of file processing outcome (network errors, permission issues)
+      // This ensures exponential backoff after any failed sync attempt
       if (filesProcessed === 0 && bytesTransferred === 0) {
+        const currentBackoff = this.syncBackoff[pairId] || INITIAL_POLL_INTERVAL_MS;
+        this.syncBackoff[pairId] = nextSyncBackoff(currentBackoff);
+      } else if (!this.isDriveChangesEnabled()) {
+        // Still increment backoff even when drive changes are disabled to prevent rapid retries
         const currentBackoff = this.syncBackoff[pairId] || INITIAL_POLL_INTERVAL_MS;
         this.syncBackoff[pairId] = nextSyncBackoff(currentBackoff);
       } else {
@@ -991,12 +1024,12 @@ export class SyncEngine {
     const remoteFiles = await this.listDriveFiles(
       remoteFolderId,
       !this.isDriveChangesEnabled()
-        || this.driveCursorRescans.has(pair.id)
-        || !this.driveChangesCacheReady.has(pair.id),
+      || this.driveCursorRescans.has(pair.id)
+      || !this.driveChangesCacheReady.has(pair.id),
     );
 
     const localSnapshot = new Map<string, { name: string; mtime: number; size: number }>();
-    
+
     // 1. Rellenar con todos los archivos vivos de la BD filtrando ignorados
     for (const [relPath, state] of dbState) {
       if (!state.is_tombstone && !scanResult.deleted.includes(relPath)) {
@@ -1033,7 +1066,7 @@ export class SyncEngine {
         isTombstone: state.is_tombstone === 1
       });
     }
-    
+
     const plan = CoreSyncLogic.computeSyncPlan(localSnapshot, remoteSnapshot, dbStateForPlan, this.DEVICE_ID);
     for (const conflict of plan.conflicts) {
       const conflictId = `${pair.id}:${conflict.localPath}:${conflict.remoteFile.id}:${conflict.baseHash ?? 'none'}`;
@@ -1089,11 +1122,11 @@ export class SyncEngine {
           }, true);
           continue;
         }
-        
+
         if (pair.progress) { pair.progress.currentFile = upload.remoteName; pair.progress.action = 'subiendo'; }
 
         const uploadedFile = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, upload.remoteName, upload.remoteId, upload.vectorClock, operationId);
-        
+
         upload.remoteId = uploadedFile.id;
         (upload as any).remoteMtime = new Date(uploadedFile.modifiedTime).getTime();
         (upload as any).remoteSize = uploadedFile.size ? parseInt(uploadedFile.size, 10) : stats.size;
@@ -1101,7 +1134,7 @@ export class SyncEngine {
 
         uploadCommits.push({ journalId, operationId });
         completedUploads.add(upload.localPath);
-        
+
         this.addEvent({
           id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
           filename: upload.remoteName, action: 'uploaded', timestamp: Date.now()
@@ -1131,10 +1164,10 @@ export class SyncEngine {
         if (pair.progress) { pair.progress.currentFile = download.remoteFile.name; pair.progress.action = 'descargando'; }
         const remoteTime = new Date(download.remoteFile.modifiedTime).getTime();
         await this.downloadDriveBinary(download.remoteFile.id, fullLocalPath, download.remoteFile.modifiedTime, download.remoteFile.md5Checksum, download.remoteFile.size ? parseInt(download.remoteFile.size, 10) : undefined);
-        
+
         const downloadedStats = await fs.stat(fullLocalPath);
         downloadedLocalMtimes.set(download.localPath, downloadedStats?.mtimeMs ?? Date.now());
-        
+
         downloadCommits.push({ journalId, operationId });
         completedDownloads.add(download.localPath);
         this.addEvent({
@@ -1188,7 +1221,7 @@ export class SyncEngine {
       } catch (e: unknown) {
         this.db.journalFail(journalId);
         if (e instanceof Error && (e.message.includes('404') || e.message.includes('File not found'))) {
-           this.db.journalDone(journalId);
+          this.db.journalDone(journalId);
         } else {
           hadFailures = true;
           console.error(`[SyncEngine] Remote delete failed for ${del.localPath}; journal retained as failed:`, e instanceof Error ? e.message : String(e));
@@ -1358,7 +1391,7 @@ export class SyncEngine {
     if (!this.accessToken) throw new Error('No OAuth access token set');
     const cached = this.driveFolderCache.get(folderId);
     if (!forceRefresh && cached && (Date.now() - cached.timestamp < 60000)) return cached.files;
-    
+
     let files: DriveFile[] = [];
     let pageToken: string | undefined = undefined;
     do {
@@ -1491,6 +1524,38 @@ export class SyncEngine {
     }));
     await this.handleDriveResponse(res);
     return (await res.json()) as DriveFile;
+  }
+  public async shutdown(): Promise<void> {
+    console.log('[SyncEngine] Iniciando cierre controlado...');
+
+    // Detener todos los intervalos de sondeo
+    for (const pairId in this.intervalRefs) {
+      clearInterval(this.intervalRefs[pairId]);
+      delete this.intervalRefs[pairId];
+    }
+    console.log('[SyncEngine] Intervalos de sondeo detenidos.');
+
+    // Detener el monitor de unidades externas
+    if (this.externalMonitorInterval) {
+      clearInterval(this.externalMonitorInterval);
+      this.externalMonitorInterval = null;
+      console.log('[SyncEngine] Monitor de unidades externas detenido.');
+    }
+
+    // Cerrar todos los observadores de archivos
+    const watcherClosures = Object.values(this.watchers).map(watcher => watcher.close());
+    await Promise.all(watcherClosures);
+    this.watchers = {};
+    console.log('[SyncEngine] Observadores de archivos cerrados.');
+
+    // Cerrar la conexión a la base de datos
+    if (this.db) {
+      await this.db.close();
+      this.db = null;
+      console.log('[SyncEngine] Conexión a la base de datos cerrada.');
+    }
+
+    console.log('[SyncEngine] Cierre controlado completado.');
   }
 }
 

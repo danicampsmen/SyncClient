@@ -331,7 +331,7 @@ export async function downloadToAtomicFile(options: DownloadOptions): Promise<vo
   let lastError: unknown;
   const sleepFn = options.sleep ?? sleep;
   for (let attempt = 1; attempt <= TRANSFER_MAX_ATTEMPTS; attempt++) {
-    const temporaryPath = `${options.destinationPath}.syncclient-download-${process.pid}-${randomUUID()}`;
+    const temporaryPath = `${options.destinationPath}.syncclient-download-${Date.now()}-${randomUUID()}`;
     try {
       const response = await requestTransfer(
         options.client,

@@ -611,7 +611,7 @@ async function startServer() {
 
       const dataBuffer = base64 ? Buffer.from(content, 'base64') : Buffer.from(content, 'utf8');
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      const temporaryPath = `${targetPath}.syncclient-tmp-${process.pid}-${Date.now()}`;
+      const temporaryPath = `${targetPath}.syncclient-tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       try {
         await fs.writeFile(temporaryPath, dataBuffer, { flag: 'wx' });
         await fs.rename(temporaryPath, targetPath);
@@ -724,17 +724,34 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "127.0.0.1", () => {
-    console.log(`Server running on http://127.0.0.1:${PORT}`);
-  });
-
-  server.on('error', (err: any) => {
+  const httpServer = app.listen(PORT, "127.0.0.1", () => {
+    console.log(`[Info] Servidor backend activo en http://127.0.0.1:${PORT}`);
+  }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.log(`[Info] El servidor backend ya está activo en el puerto ${PORT}`);
     } else {
-      console.error('Error en el servidor express:', err);
+      console.error('[Error] Error al iniciar el servidor:', err);
     }
   });
+
+  // --- Lógica de Cierre Controlado (Graceful Shutdown) ---
+  const gracefulShutdown = (signal: string) => {
+    console.log(`[Info] Recibida señal ${signal}. Cerrando el servidor de forma controlada...`);
+    httpServer.close(async () => {
+      console.log('[Info] Servidor HTTP cerrado.');
+      try {
+        await syncEngine.shutdown(); // Suponiendo que syncEngine tiene un método shutdown
+        console.log('[Info] Motor de sincronización detenido.');
+      } catch (error) {
+        console.error('[Error] Error al detener el motor de sincronización:', error);
+      }
+      process.exit(0);
+    });
+  };
+
+  // Escuchar señales de terminación
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
 startServer();

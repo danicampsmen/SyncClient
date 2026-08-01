@@ -1,4 +1,4 @@
-import { getAccessToken, refreshAccessToken } from './auth';
+import { getAccessToken, refreshAccessToken, logout } from './auth';
 
 export interface DriveFile {
   id: string;
@@ -8,41 +8,82 @@ export interface DriveFile {
   size?: string;
 }
 
+// R5: Exponential backoff para 429/5xx (1s → 2s → 4s → 8s → máx 32s)
+const RETRY_BACKOFF_BASE_MS = 1000;
+const RETRY_MAX_BACKOFF_MS = 32000;
+const MAX_RETRY_ATTEMPTS = 5;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function sleepWithRetry(res: Response, retryFactory: (token: string) => Promise<Response>, maxAttempts = MAX_RETRY_ATTEMPTS): Promise<Response> {
+  let attempt = 0;
+  while (attempt < maxAttempts) {
+    const delay = Math.min(RETRY_MAX_BACKOFF_MS, RETRY_BACKOFF_BASE_MS * (2 ** attempt));
+    const retryAfter = res.headers.get('Retry-After');
+    const waitMs = retryAfter ? Math.min(RETRY_MAX_BACKOFF_MS, parseInt(retryAfter, 10) * 1000) : delay;
+    await sleep(waitMs);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('Drive API error: No access token available for retry after 429');
+      return await retryFactory(token);
+    } catch (err: any) {
+      console.error('[Drive API] Error during 429 retry:', err?.message || err);
+      attempt++;
+    }
+  }
+  throw new Error(`Drive API error (${res.status}): Máximo número de reintentos (${maxAttempts}) alcanzado`);
+}
+
 // Fix C: No eliminar el token inmediatamente al recibir 401.
 // En su lugar, intentar renovar el token una vez antes de declarar la sesión expirada.
-let isRefreshing = false;
+// Promise-based mutex: múltiples 401 simultáneos comparten una sola renovación.
+let refreshPromise: Promise<void> | null = null;
 
 const handleResponse = async (res: Response, retryFactory?: (token: string) => Promise<Response>): Promise<Response> => {
   if (!res.ok) {
+    // R5: Handle 429 with exponential backoff (1s → 2s → 4s → 8s → max 32s)
+    if (res.status === 429) {
+      console.warn('[Drive API] Rate limited (429), applying exponential backoff with Retry-After support');
+      const token = await getAccessToken();
+      if (!token || !retryFactory) throw new Error('Drive API error (429): Rate limited and no retry path available');
+      await res.body?.cancel().catch(() => { });
+      return sleepWithRetry(res, retryFactory);
+    }
+    if (res.status >= 500 && retryFactory) {
+      console.warn(`[Drive API] Server error (${res.status}), applying exponential backoff`);
+      await res.body?.cancel().catch(() => { });
+      return sleepWithRetry(res, retryFactory);
+    }
     if (res.status === 401) {
       // Fix C: Intentar renovar el token una vez antes de fallar
-      if (retryFactory && !isRefreshing) {
-        isRefreshing = true;
-        console.log('[Drive API] 401 recibido. Intentando renovar token antes de fallar...');
-        const refreshed = await refreshAccessToken();
-        isRefreshing = false;
-        if (refreshed) {
-          // Fix P1: Re-obtener token fresco y pasarlo a la factory (no usar el token del closure)
-          const freshToken = await getAccessToken();
-          if (freshToken) {
-            const retryRes = await retryFactory(freshToken);
-            if (retryRes.ok) return retryRes;
-            if (retryRes.status === 401) {
-              // La renovación no funcionó — sesión realmente expirada
-              localStorage.removeItem('gdrive_access_token');
-              localStorage.removeItem('gdrive_token_expiry');
-              throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
-            }
-            const errorText = await retryRes.text();
-            throw new Error(`Drive API error (${retryRes.status}): ${errorText}`);
-          }
+      // Promise-based mutex: si otra llamada ya está renovando, esperamos a su resultado
+      if (retryFactory) {
+        if (!refreshPromise) {
+          refreshPromise = (async () => {
+            console.log('[Drive API] 401 recibido. Intentando renovar token antes de fallar...');
+            await refreshAccessToken();
+          })();
         }
-        localStorage.removeItem('gdrive_access_token');
-        localStorage.removeItem('gdrive_token_expiry');
+        await refreshPromise;
+        refreshPromise = null;
+        
+        const refreshed = await getAccessToken();
+        if (refreshed) {
+          const retryRes = await retryFactory(refreshed);
+          if (retryRes.ok) return retryRes;
+          if (retryRes.status === 401) {
+            await logout();
+            throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
+          }
+          const errorText = await retryRes.text();
+          throw new Error(`Drive API error (${retryRes.status}): ${errorText}`);
+        }
+        await logout();
         throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
       }
-      localStorage.removeItem('gdrive_access_token');
-      localStorage.removeItem('gdrive_token_expiry');
+      await logout();
       throw new Error('Drive API error (401): Sesión de Google Drive expirada. Se requiere re-conectar tu cuenta.');
     }
     const errorText = await res.text();
@@ -75,8 +116,8 @@ export const listFiles = async (folderId = 'root'): Promise<DriveFile[]> => {
     });
 
     const res = await doFetch(token);
-    await handleResponse(res, doFetch);
-    const data = await res.json();
+    const verifiedRes = await handleResponse(res, doFetch);
+    const data = await verifiedRes.json();
     if (data.files) allFiles.push(...data.files);
     pageToken = data.nextPageToken;
   } while (pageToken);
@@ -106,8 +147,8 @@ export const listFolders = async (parentFolderId = 'root'): Promise<DriveFile[]>
     });
 
     const res = await doFetch(token);
-    await handleResponse(res, doFetch);
-    const data = await res.json();
+    const verifiedRes = await handleResponse(res, doFetch);
+    const data = await verifiedRes.json();
     if (data.files) allFolders.push(...data.files);
     pageToken = data.nextPageToken;
   } while (pageToken);
@@ -124,11 +165,11 @@ export const getFileContent = async (fileId: string, asBlob = false): Promise<st
   });
 
   const res = await doFetch(token);
-  await handleResponse(res, doFetch);
+  const verifiedRes = await handleResponse(res, doFetch);
   if (asBlob) {
-    return await res.blob();
+    return await verifiedRes.blob();
   }
-  return await res.text();
+  return await verifiedRes.text();
 };
 
 export const uploadFile = async (folderId: string, name: string, content: string | Blob, mimeType = 'application/octet-stream'): Promise<DriveFile> => {
@@ -149,7 +190,8 @@ export const uploadFile = async (folderId: string, name: string, content: string
     const attemptResumable = async (retry = true): Promise<DriveFile | null> => {
       const token = await getAccessToken();
       if (!token) throw new Error('Not authenticated');
-      const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,modifiedTime', {
+      
+      const doFetch = () => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,modifiedTime', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -160,15 +202,11 @@ export const uploadFile = async (folderId: string, name: string, content: string
         body: JSON.stringify(metadata),
       });
 
-      if (initRes.status === 401 && retry) {
-        console.warn('[Drive API] Token expirado en resumable init, renovando...');
-        localStorage.removeItem('gdrive_access_token');
-        localStorage.removeItem('gdrive_token_expiry');
-        return attemptResumable(false);
-      }
+      const initRes = await doFetch();
+      const verifiedInitRes = await handleResponse(initRes, doFetch);
 
-      if (initRes.ok) {
-        const sessionUri = initRes.headers.get('Location');
+      if (verifiedInitRes.ok) {
+        const sessionUri = verifiedInitRes.headers.get('Location');
         if (sessionUri) {
           const putRes = await fetch(sessionUri, {
             method: 'PUT',
@@ -179,23 +217,21 @@ export const uploadFile = async (folderId: string, name: string, content: string
             body: fileBlob,
           });
           if (putRes.status === 401 && retry) {
-            localStorage.removeItem('gdrive_access_token');
-            localStorage.removeItem('gdrive_token_expiry');
+            // Retry with refreshed token
             return attemptResumable(false);
           }
           if (putRes.ok) {
             return await putRes.json();
           }
+          const errText = await putRes.text();
+          throw new Error(`Drive API error (${putRes.status}): ${errText}`);
         }
       }
       return null;
     };
-    try {
-      const result = await attemptResumable();
-      if (result) return result;
-    } catch (e: any) {
-      console.warn('[Drive API] Error en sesión Resumable, usando fallback multipart:', e.message);
-    }
+    const result = await attemptResumable();
+    if (result) return result;
+    throw new Error('Resumable upload failed: no response body from Drive API');
   }
 
   const form = new FormData();
@@ -209,8 +245,8 @@ export const uploadFile = async (folderId: string, name: string, content: string
   });
 
   const res = await doFetch(token);
-  await handleResponse(res, doFetch);
-  return await res.json();
+  const verifiedRes = await handleResponse(res, doFetch);
+  return await verifiedRes.json();
 };
 
 
@@ -224,7 +260,8 @@ export const deleteFile = async (fileId: string): Promise<void> => {
   });
 
   const res = await doFetch(token);
-  await handleResponse(res, doFetch);
+  const verifiedRes = await handleResponse(res, doFetch);
+  void verifiedRes; // Ensure response is verified before returning
 };
 
 export const createFolder = async (folderId: string, name: string): Promise<DriveFile> => {
@@ -247,6 +284,6 @@ export const createFolder = async (folderId: string, name: string): Promise<Driv
   });
 
   const res = await doFetch(token);
-  await handleResponse(res, doFetch);
-  return await res.json();
+  const verifiedRes = await handleResponse(res, doFetch);
+  return await verifiedRes.json();
 };

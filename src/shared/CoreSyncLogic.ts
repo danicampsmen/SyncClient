@@ -94,6 +94,7 @@ export class CoreSyncLogic {
     '*.temp',
     '.*',
     '~*',
+    '*~',
     '*.lock',
     '*.swp',
     '*.aux',
