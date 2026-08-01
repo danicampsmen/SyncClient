@@ -112,6 +112,133 @@ No incrustar rclone como sustituto silencioso del motor propio. Ofrecerlo como:
 
 La UI debe impedir que ambos motores trabajen sobre la misma pareja simultaneamente.
 
+## Otros modos de sincronizacion de rclone
+
+Ademas de `bisync`, rclone ofrece operaciones unidireccionales. Estas no son
+bisincronizacion: una ruta es la fuente y la otra el destino. La direccion debe
+mostrarse explicitamente en la UI para evitar invertirla por accidente.
+
+### Modo C: solo subida, conservador (`copy`)
+
+Copia cambios desde Ubuntu hacia Drive y **no borra** archivos que solo existan
+en Drive:
+
+```bash
+rclone copy /ruta/local gdrive:SyncClient \
+  --check-access --checksum --dry-run
+
+# Ejecutar despues de revisar el dry-run
+rclone copy /ruta/local gdrive:SyncClient \
+  --check-access --checksum --retries 3 --low-level-retries 10
+```
+
+Usarlo para:
+
+- respaldos incrementales;
+- publicar archivos nuevos o modificados;
+- proteger archivos remotos contra borrado accidental.
+
+`copy` no elimina el destino. Por eso no garantiza que Drive sea un espejo
+exacto del directorio local.
+
+### Modo D: solo subida, espejo destructivo (`sync`)
+
+Hace que Drive coincida con Ubuntu y puede borrar del destino lo que no exista
+en la fuente:
+
+```bash
+rclone sync /ruta/local gdrive:SyncClient \
+  --check-access --checksum --max-delete 10 --dry-run
+
+# Ejecutar solo despues de validar la lista de borrados
+rclone sync /ruta/local gdrive:SyncClient \
+  --check-access --checksum --max-delete 10 \
+  --retries 3 --low-level-retries 10
+```
+
+Usarlo solo si Ubuntu es la fuente autoritativa. `--dry-run`, `--max-delete` y
+un backup previo son obligatorios para una operacion segura.
+
+### Modo E: solo bajada, conservador (`copy` invertido)
+
+Copia cambios desde Drive hacia Ubuntu y **no borra** archivos locales que no
+existan en Drive:
+
+```bash
+rclone copy gdrive:SyncClient /ruta/local \
+  --check-access --checksum --dry-run
+
+# Ejecutar despues de revisar el dry-run
+rclone copy gdrive:SyncClient /ruta/local \
+  --check-access --checksum --retries 3 --low-level-retries 10
+```
+
+Usarlo para:
+
+- descargar una copia local;
+- recuperar datos desde Drive;
+- actualizar una carpeta local sin eliminar archivos extras.
+
+### Modo F: solo bajada, espejo destructivo (`sync` invertido)
+
+Hace que Ubuntu coincida con Drive y puede borrar del destino local lo que no
+exista en Drive:
+
+```bash
+rclone sync gdrive:SyncClient /ruta/local \
+  --check-access --checksum --max-delete 10 --dry-run
+
+# Ejecutar solo despues de validar la lista de borrados
+rclone sync gdrive:SyncClient /ruta/local \
+  --check-access --checksum --max-delete 10 \
+  --retries 3 --low-level-retries 10
+```
+
+Usarlo solo si Drive es la fuente autoritativa. No debe ejecutarse sobre la
+carpeta de trabajo de Ubuntu sin una copia de seguridad y una confirmacion
+explicita del usuario.
+
+### Modo G: copiar un archivo o renombrar (`copyto`)
+
+`copyto` sirve para un archivo individual o para copiar un directorio con un
+nombre de destino especifico. No elimina archivos del destino:
+
+```bash
+rclone copyto /ruta/local/nota.pdf gdrive:SyncClient/nota.pdf \
+  --checksum --dry-run
+```
+
+### Modo H: mover una entrada (`moveto`)
+
+`moveto` transfiere y elimina el origen despues de una transferencia exitosa.
+No es un modo de sincronizacion recurrente y debe tratarse como destructivo:
+
+```bash
+rclone moveto /ruta/local/nota.pdf gdrive:SyncClient/nota.pdf \
+  --checksum --dry-run
+```
+
+No usar `moveto` para backups ni para el ciclo normal de SyncClient.
+
+### Matriz de seleccion
+
+| Modo | Direccion | Borra destino | Uso recomendado |
+|---|---|---:|---|
+| `bisync` | Ambos lados | Segun deltas y politica | Bisincronizacion |
+| `copy` | Fuente -> destino | No | Backup/publicacion conservadora |
+| `sync` | Fuente -> destino | Si | Espejo de una sola fuente |
+| `copyto` | Entrada -> destino | No | Archivo o nombre puntual |
+| `moveto` | Entrada -> destino | Borra origen | Migracion puntual |
+
+Para todos los modos:
+
+- probar primero con `--dry-run`;
+- usar `--checksum` cuando la integridad sea prioritaria;
+- revisar `--combined`, `--differ`, `--error` o `--dest-after` cuando se
+  necesite un informe auditable;
+- no ejecutar dos comandos sobre la misma pareja simultaneamente;
+- no confundir `copy` con `sync`: `sync` puede borrar el destino.
+
 # 2. Motor propio basado en Drive API + SQLite
 
 ## Arquitectura final recomendada
