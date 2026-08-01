@@ -433,6 +433,7 @@ class SyncEngine {
       }
     }
     this.pendingConflicts = this.pendingConflicts.filter(c => c.id !== conflictId);
+    if (this.db) this.db.resolveConflict(conflictId, resolution);
     await this.saveState();
   }
 
@@ -795,12 +796,39 @@ class SyncEngine {
         remoteMtime: state.remote_mtime || 0,
         remoteId: state.remote_id || '',
         fileSize: state.file_size,
+        baseHash: state.md5_hash,
         vectorClock: state.vector_clock,
         isTombstone: state.is_tombstone === 1
       });
     }
     
     const plan = CoreSyncLogic.computeSyncPlan(localSnapshot, remoteSnapshot, dbStateForPlan, this.DEVICE_ID);
+    for (const conflict of plan.conflicts) {
+      const conflictId = `${pair.id}:${conflict.localPath}:${conflict.remoteFile.id}:${conflict.baseHash ?? 'none'}`;
+      this.db.setConflict({
+        id: conflictId,
+        pair_id: pair.id,
+        rel_path: conflict.localPath,
+        local_hash: conflict.localHash ?? null,
+        remote_hash: conflict.remoteHash ?? null,
+        base_hash: conflict.baseHash ?? null,
+        resolution: 'pending',
+        created_at: Date.now(),
+      });
+      if (!this.pendingConflicts.some(existing => existing.id === conflictId)) {
+        this.pendingConflicts.push({
+          id: conflictId,
+          pairId: pair.id,
+          relativePath: conflict.localPath,
+          localPath: conflict.localPath,
+          localMtime: 0,
+          remoteFileId: conflict.remoteFile.id,
+          remoteFileName: conflict.remoteFile.name,
+          remoteMtime: new Date(conflict.remoteFile.modifiedTime).getTime(),
+          timestamp: Date.now(),
+        });
+      }
+    }
     const completedUploads = new Set<string>();
     const completedDownloads = new Set<string>();
     const uploadCommits: Array<{ journalId: number; operationId: string | null }> = [];

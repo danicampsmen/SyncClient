@@ -57,6 +57,7 @@ export interface IStorageBackend {
     getUploadSession(operationId: string): UploadSession | null;
     deleteUploadSession(operationId: string): void;
     setConflict(conflict: SyncConflict): void;
+    resolveConflict(id: string, resolution: string): void;
     getPendingConflicts(pairId: string): SyncConflict[];
 
     // Mantenimiento
@@ -551,6 +552,12 @@ export class SQLiteBackend implements IStorageBackend {
         else this.db.prepare(sql).run(...params);
     }
 
+    resolveConflict(id: string, resolution: string): void {
+        const sql = 'UPDATE sync_conflicts SET resolution = ? WHERE id = ?';
+        if (isCapacitor()) this.db.run(sql, [resolution, id]);
+        else this.db.prepare(sql).run(resolution, id);
+    }
+
     getPendingConflicts(pairId: string): SyncConflict[] {
         const sql = "SELECT * FROM sync_conflicts WHERE pair_id = ? AND resolution = 'pending' ORDER BY created_at";
         const rows = isCapacitor()
@@ -866,6 +873,13 @@ export class JSONBackend implements IStorageBackend {
 
     setConflict(conflict: SyncConflict): void {
         this.data.conflicts[conflict.id] = conflict;
+        this.dirty = true;
+    }
+
+    resolveConflict(id: string, resolution: string): void {
+        const conflict = this.data.conflicts[id];
+        if (!conflict) return;
+        conflict.resolution = resolution;
         this.dirty = true;
     }
 

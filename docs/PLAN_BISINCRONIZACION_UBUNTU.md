@@ -567,10 +567,16 @@ Estado actual de la fase:
 
 ## Fase 4 - Planificacion y conflictos
 
-- Guardar hash base local y remoto.
-- Evitar decisiones basadas solamente en mtime.
-- Registrar conflictos y resoluciones.
-- Definir versionado antes de habilitar borrados automaticos.
+- [Completada] Usar el hash base persistido junto con tamaño y mtime como
+  evidencia de cambios.
+- [Completada] Detectar conflictos cuando ambos lados cambian aunque los mtimes
+  permanezcan iguales.
+- [Completada] Tratar eliminacion local frente a modificacion remota como
+  conflicto, evitando borrados automaticos.
+- [Completada] Persistir conflictos pendientes y sus resoluciones en SQLite o
+  JSON.
+- Pendiente: exponer una resolucion especifica para conflictos de tipo
+  eliminacion-versus-modificacion en la interfaz de usuario.
 
 ## Fase 5 - Watcher y rendimiento
 

@@ -67,6 +67,10 @@ export interface SyncPlan {
     remoteFile: RemoteEntry;
     localVc: string;
     remoteVc: string;
+    localHash?: string | null;
+    remoteHash?: string | null;
+    baseHash?: string | null;
+    reason?: 'both_modified' | 'delete_vs_modify';
   }>;
 }
 
@@ -75,6 +79,7 @@ export interface SyncStateSnapshot {
   remoteMtime: number;
   remoteId: string;
   fileSize: number | null;
+  baseHash?: string | null;
   vectorClock?: string | null;
   isTombstone?: boolean; // <-- AÑADIDO: Flag para identificar archivos borrados en Drive
 }
@@ -204,7 +209,7 @@ export class CoreSyncLogic {
    * FUNCIÓN PURA: sin I/O, sin DB, sin Drive. 100% testeable.
    */
   public static computeSyncPlan(
-    localSnapshot: ReadonlyMap<string, { name: string; mtime: number; size: number }>,
+    localSnapshot: ReadonlyMap<string, { name: string; mtime: number; size: number; hash?: string | null }>,
     remoteSnapshot: ReadonlyMap<string, RemoteEntry>,
     dbState: ReadonlyMap<string, SyncStateSnapshot>,
     deviceId: string
@@ -224,7 +229,7 @@ export class CoreSyncLogic {
     }
 
     // Índice case-insensitive para local
-    const localByLowerName = new Map<string, { name: string; mtime: number; size: number }>();
+    const localByLowerName = new Map<string, { name: string; mtime: number; size: number; hash?: string | null }>();
     for (const [relPath, entry] of localSnapshot) {
       localByLowerName.set(entry.name.toLowerCase(), entry);
     }
@@ -257,12 +262,17 @@ export class CoreSyncLogic {
       // Archivo ya conocido — ¿cambió localmente?
       const mtimeChanged = Math.abs(localEntry.mtime - dbEntry.localMtime) > 3000;
       const sizeChanged = dbEntry.fileSize !== null && localEntry.size !== dbEntry.fileSize;
+      const localHashChanged = localEntry.hash != null && dbEntry.baseHash != null
+        && localEntry.hash.toLowerCase() !== dbEntry.baseHash.toLowerCase();
+      const localChanged = localHashChanged || mtimeChanged || sizeChanged;
 
-      if (!mtimeChanged && !sizeChanged) {
+      if (!localChanged) {
         // Si no cambió local, revisamos si cambió remoto
         if (remoteEntry) {
           const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
-          if (Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000) {
+          const remoteHashChanged = remoteEntry.md5Checksum != null && dbEntry.baseHash != null
+            && remoteEntry.md5Checksum.toLowerCase() !== dbEntry.baseHash.toLowerCase();
+          if (remoteHashChanged || Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000) {
             const baseClock = parseClock(dbEntry.vectorClock);
             plan.downloads.push({
               remoteFile: remoteEntry,
@@ -277,7 +287,9 @@ export class CoreSyncLogic {
       if (remoteEntry) {
         // Existe en ambos lados y cambió localmente — validamos si también cambió remotamente
         const remoteMtime = new Date(remoteEntry.modifiedTime).getTime();
-        const remoteChanged = Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000;
+        const remoteHashChanged = remoteEntry.md5Checksum != null && dbEntry.baseHash != null
+          && remoteEntry.md5Checksum.toLowerCase() !== dbEntry.baseHash.toLowerCase();
+        const remoteChanged = remoteHashChanged || Math.abs(remoteMtime - dbEntry.remoteMtime) > 3000;
 
         if (remoteChanged) {
           // Ambos cambiaron — conflicto legítimo
@@ -287,7 +299,11 @@ export class CoreSyncLogic {
             localPath: relPath,
             remoteFile: remoteEntry,
             localVc: JSON.stringify(localVc),
-            remoteVc: JSON.stringify(remoteClock(remoteEntry, baseClock))
+            remoteVc: JSON.stringify(remoteClock(remoteEntry, baseClock)),
+            localHash: localEntry.hash ?? null,
+            remoteHash: remoteEntry.md5Checksum ?? null,
+            baseHash: dbEntry.baseHash ?? null,
+            reason: 'both_modified',
           });
         } else {
           // Solo local cambió — upload
@@ -324,12 +340,27 @@ export class CoreSyncLogic {
           Number.isFinite(remoteMtime) &&
           Math.abs(remoteMtime - dbEntry!.remoteMtime) > 3000;
         const remoteSize = remoteEntry.size === undefined ? undefined : Number.parseInt(remoteEntry.size, 10);
+        const remoteHashChanged = remoteEntry.md5Checksum != null && dbEntry?.baseHash != null
+          && remoteEntry.md5Checksum.toLowerCase() !== dbEntry.baseHash.toLowerCase();
         const sizeChanged = Boolean(dbEntry) &&
           remoteSize !== undefined &&
           Number.isFinite(remoteSize) &&
           remoteSize !== dbEntry!.fileSize;
 
-        if (!dbEntry || dbEntry.remoteId !== remoteEntry.id || remoteChanged || sizeChanged) {
+        if (dbEntry && dbEntry.baseHash != null && dbEntry.remoteId === remoteEntry.id
+          && (remoteChanged || sizeChanged || remoteHashChanged)) {
+          const baseClock = parseClock(dbEntry.vectorClock);
+          plan.conflicts.push({
+            localPath: remoteEntry.name,
+            remoteFile: remoteEntry,
+            localVc: JSON.stringify(baseClock),
+            remoteVc: JSON.stringify(remoteClock(remoteEntry, baseClock)),
+            localHash: null,
+            remoteHash: remoteEntry.md5Checksum ?? null,
+            baseHash: dbEntry.baseHash ?? null,
+            reason: 'delete_vs_modify',
+          });
+        } else if (!dbEntry || dbEntry.remoteId !== remoteEntry.id || remoteChanged || sizeChanged || remoteHashChanged) {
           // Archivo remoto nuevo o actualizado remotamente — descargar
           plan.downloads.push({
             remoteFile: remoteEntry,
@@ -359,10 +390,33 @@ export class CoreSyncLogic {
         // Evitamos enviar orden de borrar en remoto si detectamos que justo
         // ese mismo archivo está programado para descargarse (porque alguien lo editó online).
         const isDownloading = plan.downloads.some(d => d.localPath.toLowerCase() === relPath.toLowerCase());
+        const isConflicting = plan.conflicts.some(c => c.localPath.toLowerCase() === relPath.toLowerCase());
 
-        if (!isDownloading) {
+        if (!isDownloading && !isConflicting) {
           if (dbEntry.remoteId) {
-            plan.deleteRemote.push({ remoteId: dbEntry.remoteId, localPath: relPath });
+            const remoteEntry = Array.from(remoteSnapshot.values()).find(entry => entry.id === dbEntry.remoteId);
+            const remoteChanged = dbEntry.baseHash != null && remoteEntry != null && (
+              (remoteEntry.md5Checksum != null && dbEntry.baseHash != null
+                && remoteEntry.md5Checksum.toLowerCase() !== dbEntry.baseHash.toLowerCase())
+              || (remoteEntry.size != null && dbEntry.fileSize != null
+                && Number.parseInt(remoteEntry.size, 10) !== dbEntry.fileSize)
+              || Math.abs(new Date(remoteEntry?.modifiedTime ?? 0).getTime() - dbEntry.remoteMtime) > 3000
+            );
+            if (remoteChanged && remoteEntry) {
+              const baseClock = parseClock(dbEntry.vectorClock);
+              plan.conflicts.push({
+                localPath: relPath,
+                remoteFile: remoteEntry,
+                localVc: JSON.stringify(baseClock),
+                remoteVc: JSON.stringify(remoteClock(remoteEntry, baseClock)),
+                localHash: null,
+                remoteHash: remoteEntry.md5Checksum ?? null,
+                baseHash: dbEntry.baseHash ?? null,
+                reason: 'delete_vs_modify',
+              });
+            } else {
+              plan.deleteRemote.push({ remoteId: dbEntry.remoteId, localPath: relPath });
+            }
           } else {
             plan.deleteLocal.push({ localPath: relPath }); // Solo limpiar de la DB
           }

@@ -273,6 +273,46 @@ describe('CoreSyncLogic.computeSyncPlan', () => {
     expect(plan.downloads).toHaveLength(0);
   });
 
+  it('uses hashes to detect both-sided changes even when mtimes are unchanged', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map([['nota.pdf', { name: 'nota.pdf', mtime: 10_000, size: 100, hash: 'local-hash' }]]),
+      new Map([['nota.pdf', remoteFile({ md5Checksum: 'remote-hash' })]]),
+      new Map([['nota.pdf', dbFile({ baseHash: 'base-hash' })]]),
+      'device-a',
+    );
+
+    expect(plan.conflicts).toEqual([expect.objectContaining({
+      localPath: 'nota.pdf',
+      localHash: 'local-hash',
+      remoteHash: 'remote-hash',
+      baseHash: 'base-hash',
+      reason: 'both_modified',
+    })]);
+  });
+
+  it('does not delete remotely when local deletion races with a remote modification', () => {
+    const plan = CoreSyncLogic.computeSyncPlan(
+      new Map(),
+      new Map([['nota.pdf', remoteFile({
+        modifiedTime: '1970-01-01T00:00:20.000Z',
+        md5Checksum: 'remote-hash',
+      })]]),
+      new Map([['nota.pdf', dbFile({
+        baseHash: 'base-hash',
+        remoteMtime: 10_000,
+      })]]),
+      'device-a',
+    );
+
+    expect(plan.deleteRemote).toHaveLength(0);
+    expect(plan.conflicts).toEqual([expect.objectContaining({
+      localPath: 'nota.pdf',
+      remoteHash: 'remote-hash',
+      baseHash: 'base-hash',
+      reason: 'delete_vs_modify',
+    })]);
+  });
+
   it('downloads remote-only files and schedules missing files for deletion', () => {
     const plan = CoreSyncLogic.computeSyncPlan(
       new Map(),
@@ -289,7 +329,7 @@ describe('CoreSyncLogic.computeSyncPlan', () => {
       localPath: 'new.pdf',
       remoteFile: { id: 'new-remote', name: 'new.pdf' },
     });
-    expect(plan.deleteRemote).toEqual([{ remoteId: 'gone-remote' }]);
+    expect(plan.deleteRemote).toEqual([{ remoteId: 'gone-remote', localPath: 'gone.pdf' }]);
     expect(plan.deleteLocal).toEqual([{ localPath: 'local-only.pdf' }]);
   });
 });
