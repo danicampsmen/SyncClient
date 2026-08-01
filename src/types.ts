@@ -84,6 +84,8 @@ export interface PendingConflict {
   remoteFileName: string;
   reason: string | null;
   baseHash: string | null;
+  localHash: string | null;
+  remoteHash: string | null;
   localSize: number | null;
   localMtime: number;
   remoteSize: number | null;

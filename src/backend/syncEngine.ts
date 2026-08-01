@@ -603,42 +603,118 @@ export class SyncEngine {
     this.saveState();
   }
 
-  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'skip'): Promise<void> {
+  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename' | 'skip'): Promise<void> {
     const conflict = this.pendingConflicts.find(c => c.id === conflictId);
     if (!conflict) return;
-    if (resolution === 'local') {
-      const pair = this.pairs.find(p => p.id === conflict.pairId);
-      if (pair) {
-        const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'upload', conflict.remoteFileId);
-        try {
-          await this.uploadDriveBinary(pair.remotePath, conflict.localPath, conflict.remoteFileName, conflict.remoteFileId, undefined, operationId);
-          if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
-        } catch (error) {
-          if (operationId && this.db) this.db.updateOperation(operationId, {
-            status: 'retry', last_error: error instanceof Error ? error.message : String(error), updated_at: Date.now(),
-          });
-          throw error;
-        }
-      }
-    } else if (resolution === 'remote') {
-      const pair = this.pairs.find(p => p.id === conflict.pairId);
-      if (pair) {
-        const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'download', conflict.remoteFileId);
-        try {
-          await this.downloadDriveBinary(conflict.remoteFileId, conflict.localPath, new Date(conflict.remoteMtime).toISOString());
-          if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
-        } catch (error) {
-          if (operationId && this.db) this.db.updateOperation(operationId, {
-            status: 'retry', last_error: error instanceof Error ? error.message : String(error), updated_at: Date.now(),
-          });
-          throw error;
-        }
+    const pair = this.pairs.find(p => p.id === conflict.pairId);
+    if (!pair) return;
+    const fullLocalPath = path.join(pair.localPath, conflict.localPath);
+    let effective: 'local' | 'remote' | 'rename' | 'skip' = resolution;
+    if (effective === 'local') {
+      try {
+        await fs.access(fullLocalPath);
+      } catch {
+        console.warn(`[SyncEngine/ResolveConflict] '${conflict.localPath}' no existe localmente; resolviendo como 'remote' (restaurar desde Drive)`);
+        effective = 'remote';
       }
     }
+
+    if (effective === 'local') {
+      // Confiar en la versión local: subir el archivo local a Drive (actualización in place del remote existente)
+      const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'upload', conflict.remoteFileId);
+      try {
+        const uploaded = await this.uploadDriveBinary(pair.remotePath, fullLocalPath, conflict.remoteFileName, conflict.remoteFileId, undefined, operationId);
+        this.markSelfWritten(fullLocalPath);
+        if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
+        const stats = await fs.stat(fullLocalPath);
+        await this.commitResolutionState(pair, conflict.localPath, {
+          remoteId: uploaded.id ?? conflict.remoteFileId,
+          remoteMtime: uploaded.modifiedTime ? new Date(uploaded.modifiedTime).getTime() : conflict.remoteMtime,
+          md5: uploaded.md5Checksum ?? conflict.localHash ?? conflict.remoteHash ?? null,
+          localMtime: stats.mtimeMs,
+          fileSize: stats.size,
+        });
+      } catch (error) {
+        if (operationId && this.db) this.db.updateOperation(operationId, {
+          status: 'retry', last_error: error instanceof Error ? error.message : String(error), updated_at: Date.now(),
+        });
+        throw error;
+      }
+    } else if (effective === 'remote') {
+      // Confiar en la versión remota: descargarla sobrescribiendo el local
+      const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'download', conflict.remoteFileId);
+      try {
+        await this.downloadDriveBinary(conflict.remoteFileId, fullLocalPath, new Date(conflict.remoteMtime).toISOString());
+        this.markSelfWritten(fullLocalPath);
+        if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
+        const stats = await fs.stat(fullLocalPath);
+        await this.commitResolutionState(pair, conflict.localPath, {
+          remoteId: conflict.remoteFileId,
+          remoteMtime: conflict.remoteMtime,
+          md5: conflict.remoteHash ?? conflict.localHash ?? null,
+          localMtime: stats.mtimeMs,
+          fileSize: stats.size,
+        });
+      } catch (error) {
+        if (operationId && this.db) this.db.updateOperation(operationId, {
+          status: 'retry', last_error: error instanceof Error ? error.message : String(error), updated_at: Date.now(),
+        });
+        throw error;
+      }
+    } else if (effective === 'rename') {
+      // Guardar ambos: conservar el local y descargar el remoto como hermano .remote
+      const parsed = path.parse(fullLocalPath);
+      const renamedPath = path.join(parsed.dir, `${parsed.name}.remote${parsed.ext}`);
+      const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'download', conflict.remoteFileId);
+      try {
+        await this.downloadDriveBinary(conflict.remoteFileId, renamedPath, new Date(conflict.remoteMtime).toISOString());
+        this.markSelfWritten(renamedPath);
+        if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
+        const stats = await fs.stat(fullLocalPath);
+        await this.commitResolutionState(pair, conflict.localPath, {
+          remoteId: conflict.remoteFileId,
+          remoteMtime: conflict.remoteMtime,
+          md5: conflict.remoteHash ?? conflict.localHash ?? null,
+          localMtime: stats.mtimeMs,
+          fileSize: stats.size,
+        });
+      } catch (error) {
+        if (operationId && this.db) this.db.updateOperation(operationId, {
+          status: 'retry', last_error: error instanceof Error ? error.message : String(error), updated_at: Date.now(),
+        });
+        throw error;
+      }
+    }
+
     this.pendingConflicts = this.pendingConflicts.filter(c => c.id !== conflictId);
-    if (this.db) this.db.resolveConflict(conflictId, resolution);
+    if (this.db) this.db.resolveConflict(conflictId, effective);
     await this.saveState();
   }
+
+  private async commitResolutionState(pair: SyncPair, relPath: string, opts: {
+    remoteId: string; remoteMtime: number; md5: string | null; localMtime: number; fileSize: number | null;
+  }): Promise<void> {
+    if (!this.db) return;
+    const existing = this.db.getFileState(pair.id, relPath);
+    const now = Date.now();
+    const state: FileState = {
+      pair_id: pair.id,
+      rel_path: relPath,
+      remote_id: opts.remoteId,
+      local_mtime: opts.localMtime,
+      remote_mtime: opts.remoteMtime,
+      file_size: opts.fileSize,
+      md5_hash: opts.md5,
+      block_hashes: existing?.block_hashes ?? null,
+      vector_clock: existing?.vector_clock ?? '{}',
+      device_id: existing?.device_id ?? this.DEVICE_ID!,
+      etag: existing?.etag ?? null,
+      updated_at: now,
+      is_tombstone: 0,
+    };
+    this.db.setFileState(pair.id, relPath, state);
+  }
+
 
   public async cleanDuplicates(pairId: string): Promise<{ localDeleted: number; localRenamed: number; remoteDeleted: number; remoteRenamed: number }> {
     return { localDeleted: 0, localRenamed: 0, remoteDeleted: 0, remoteRenamed: 0 };
@@ -1099,6 +1175,8 @@ export class SyncEngine {
           remoteFileName: conflict.remoteFile.name,
           reason: conflict.reason ?? null,
           baseHash: conflict.baseHash ?? null,
+          localHash: conflict.localHash ?? null,
+          remoteHash: conflict.remoteHash ?? null,
           localSize: localSnapshot.get(conflict.localPath)?.size ?? null,
           localMtime: localSnapshot.get(conflict.localPath)?.mtime ?? 0,
           remoteSize: conflict.remoteFile.size ? parseInt(conflict.remoteFile.size, 10) : null,
