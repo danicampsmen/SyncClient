@@ -14,6 +14,40 @@ export class PairAlreadyRunningError extends Error {
   }
 }
 
+async function isProcessAlive(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') return true;
+    return false;
+  }
+}
+
+async function reclaimStaleLock(lockPath: string): Promise<boolean> {
+  try {
+    const raw = await fs.readFile(lockPath, 'utf8');
+    let metadata: { pid?: number } | null = null;
+    try {
+      metadata = JSON.parse(raw) as { pid?: number };
+    } catch {
+      metadata = null;
+    }
+
+    if (metadata?.pid && Number.isInteger(metadata.pid)) {
+      if (await isProcessAlive(metadata.pid)) return false;
+    }
+
+    await fs.rm(lockPath, { force: true });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export async function acquirePairLock(lockDirectory: string, pairId: string): Promise<PairLock> {
   await fs.mkdir(lockDirectory, { recursive: true, mode: 0o700 });
   const safeName = createHash('sha256').update(pairId).digest('hex');
@@ -23,9 +57,15 @@ export async function acquirePairLock(lockDirectory: string, pairId: string): Pr
     handle = await fs.open(lockPath, 'wx', 0o600);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new PairAlreadyRunningError(pairId);
+      const reclaimed = await reclaimStaleLock(lockPath);
+      if (reclaimed) {
+        handle = await fs.open(lockPath, 'wx', 0o600);
+      } else {
+        throw new PairAlreadyRunningError(pairId);
+      }
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));

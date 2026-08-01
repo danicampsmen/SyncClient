@@ -1,14 +1,28 @@
 import { Capacitor } from '@capacitor/core';
 import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
 
+const electronBridge = typeof window !== 'undefined' ? (window as Window & {
+  electronBridge?: {
+    isElectron?: boolean;
+    secureSet?: (key: string, value: string) => Promise<void>;
+    secureGet?: (key: string) => Promise<string | null>;
+    secureRemove?: (key: string) => Promise<void>;
+  };
+}).electronBridge : undefined;
+
 export const SecureStore = {
     async set(key: string, value: string): Promise<void> {
         if (Capacitor.isNativePlatform()) {
             await SecureStoragePlugin.set({ key, value });
-        } else {
-            // TODO futuro: Conectar con electronBridge.safeStorageSet(key, value)
-            localStorage.setItem(key, value);
+            return;
         }
+
+        if (electronBridge?.isElectron && electronBridge.secureSet) {
+            await electronBridge.secureSet(key, value);
+            return;
+        }
+
+        localStorage.setItem(key, value);
     },
 
     async get(key: string): Promise<string | null> {
@@ -17,11 +31,15 @@ export const SecureStore = {
                 const { value } = await SecureStoragePlugin.get({ key });
                 return value;
             } catch {
-                return null; // El plugin lanza error si la clave no existe
+                return null;
             }
-        } else {
-            return localStorage.getItem(key);
         }
+
+        if (electronBridge?.isElectron && electronBridge.secureGet) {
+            return electronBridge.secureGet(key);
+        }
+
+        return localStorage.getItem(key);
     },
 
     async remove(key: string): Promise<void> {
@@ -29,8 +47,14 @@ export const SecureStore = {
             try {
                 await SecureStoragePlugin.remove({ key });
             } catch { }
-        } else {
-            localStorage.removeItem(key);
+            return;
         }
+
+        if (electronBridge?.isElectron && electronBridge.secureRemove) {
+            await electronBridge.secureRemove(key);
+            return;
+        }
+
+        localStorage.removeItem(key);
     }
 };

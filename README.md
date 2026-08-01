@@ -60,10 +60,17 @@ cp .env.example .env.local
 | Variable | Descripción |
 |---|---|
 | `CORS_ORIGIN` | Origen CORS permitido (opcional, para despliegues personalizados) |
+| `VITE_FIREBASE_API_KEY` | API key pública de Firebase para inicializar la app web/desktop |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Auth domain público de Firebase |
+| `VITE_FIREBASE_PROJECT_ID` | Project ID público de Firebase |
+| `VITE_FIREBASE_STORAGE_BUCKET` | Storage bucket público de Firebase |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Sender ID público de Firebase |
+| `VITE_FIREBASE_APP_ID` | App ID público de Firebase |
+| `VITE_FIREBASE_OAUTH_CLIENT_ID` | Client ID público de Google OAuth para Drive |
 
 ### Firebase
 
-El archivo `firebase-applet-config.json` contiene la configuración de Firebase. Asegúrate de que los siguientes scopes estén habilitados:
+La configuración pública de Firebase debe venir desde variables de entorno del despliegue (`VITE_FIREBASE_*`) y no desde un JSON fijo en el repositorio. Asegúrate de que los siguientes scopes estén habilitados:
 
 - `https://www.googleapis.com/auth/drive`
 - `profile`
@@ -139,12 +146,12 @@ SyncClient detecta automáticamente archivos numerados como `Nota(1).pdf`, `Nota
 - CORS restringido a orígenes locales configurados
 - OAuth relay para dispositivos móviles sin navegador
 - Sesiones aisladas en Electron (partitioned sessions)
-- La migración completa de tokens a almacenamiento seguro de escritorio sigue
-  pendiente; no usar esta versión como producto de producción sin revisarla.
+- La persistencia de tokens en Electron usa almacenamiento seguro del sistema
+  cuando está disponible y una capa local cifrada por `safeStorage` para desktop.
 
 ## Known Issues
 
-- El almacenamiento seguro de tokens para Electron todavía está pendiente.
+- El almacenamiento seguro de tokens para Electron ya se resuelve con `safeStorage` + IPC del proceso principal y un store local cifrado por usuario.
 - `utimes` no está implementado en CapacitorFS; Android usa sidecars `.syncmeta`.
 - `VFSBridge.readFile/writeFile` en modo desktop requiere verificación de endpoints.
 - La bisincronización incremental de Ubuntu con `changes.list` y cursores SQLite

@@ -170,11 +170,14 @@ const remoteFile = (overrides: Partial<RemoteEntry> = {}): RemoteEntry => ({
   ...overrides,
 });
 
-const dbFile = (overrides: Partial<{ localMtime: number; remoteMtime: number; remoteId: string; fileSize: number }> = {}) => ({
+const dbFile = (overrides: Partial<{ localMtime: number; remoteMtime: number; remoteId: string; fileSize: number; baseHash: string | null; vectorClock: string | null; isTombstone: boolean }> = {}) => ({
   localMtime: 10_000,
   remoteMtime: 10_000,
   remoteId: 'remote-1',
   fileSize: 100,
+  baseHash: null,
+  vectorClock: null,
+  isTombstone: false,
   ...overrides,
 });
 

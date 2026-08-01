@@ -7,10 +7,11 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
-import firebaseConfig from '../firebase-applet-config.json';
+import { getFirebaseClientConfig } from './config/firebaseConfig';
 import { backendFetch, ensureBackendSession } from './services/backendSession';
 import { SecureStore } from './utils/secureStore';
 
+const firebaseConfig = getFirebaseClientConfig();
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 

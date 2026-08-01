@@ -58,6 +58,7 @@
   "build": {
     "appId": "com.syncclient.desktop",
     "productName": "SyncClient",
+    "icon": "syncclient",
     "directories": {
       "output": "release"
     },
@@ -66,7 +67,8 @@
         "AppImage",
         "deb"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "syncDesktopName": true
     },
     "files": [
       "dist/**/*",

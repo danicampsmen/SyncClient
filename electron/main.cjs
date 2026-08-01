@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, session, dialog, ipcMain, shell, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, session, dialog, ipcMain, shell, Notification, safeStorage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const firefoxUserAgent = 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0';
 app.commandLine.appendSwitch('disable-features', 'UserAgentClientHint');
@@ -14,6 +15,79 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let activeOAuthPromise = null;
+
+const secureStorePath = path.join(app.getPath('userData'), 'syncclient-secure-store.json');
+let secureStoreState = {};
+
+function loadSecureStoreState() {
+  try {
+    if (!fs.existsSync(secureStorePath)) {
+      secureStoreState = {};
+      return;
+    }
+    const raw = fs.readFileSync(secureStorePath, 'utf8');
+    secureStoreState = raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    console.warn('[Electron] No se pudo cargar el store seguro local:', error?.message || error);
+    secureStoreState = {};
+  }
+}
+
+async function persistSecureStoreState() {
+  try {
+    fs.writeFileSync(secureStorePath, JSON.stringify(secureStoreState, null, 2));
+  } catch (error) {
+    console.error('[Electron] No se pudo persistir el store seguro local:', error?.message || error);
+  }
+}
+
+ipcMain.handle('secure-store-set', async (_event, key, value) => {
+  if (!key || typeof value !== 'string') return false;
+  loadSecureStoreState();
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(value);
+    secureStoreState[key] = {
+      version: 1,
+      encrypted: encrypted.toString('base64'),
+    };
+  } else {
+    secureStoreState[key] = {
+      version: 0,
+      plain: value,
+    };
+  }
+  await persistSecureStoreState();
+  return true;
+});
+
+ipcMain.handle('secure-store-get', async (_event, key) => {
+  loadSecureStoreState();
+  const item = secureStoreState[key];
+  if (!item) return null;
+  if (item.version === 1 && typeof item.encrypted === 'string') {
+    try {
+      const buffer = Buffer.from(item.encrypted, 'base64');
+      return safeStorage.decryptString(buffer);
+    } catch (error) {
+      console.warn('[Electron] No se pudo descifrar valor seguro:', error?.message || error);
+      return null;
+    }
+  }
+  return item.plain || null;
+});
+
+ipcMain.handle('secure-store-remove', async (_event, key) => {
+  if (!key) return false;
+  loadSecureStoreState();
+  if (secureStoreState[key] !== undefined) {
+    delete secureStoreState[key];
+    await persistSecureStoreState();
+    return true;
+  }
+  return false;
+});
+
+loadSecureStoreState();
 
 // Manejador IPC para selector nativo de directorio en Linux/Desktop
 ipcMain.handle('select-directory', async () => {
@@ -72,8 +146,15 @@ async function exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri) 
 async function openGoogleAuth() {
   console.log('[Electron] Iniciando ventana nativa de OAuth (PKCE Authorization Code Flow)...');
 
-  const firebaseConfig = require(path.join(__dirname, '..', 'firebase-applet-config.json'));
-  const clientId = firebaseConfig.oAuthClientId;
+  const clientId = process.env.VITE_FIREBASE_OAUTH_CLIENT_ID
+    || (function readFallback() {
+      try {
+        const firebaseConfig = require(path.join(__dirname, '..', 'firebase-applet-config.json'));
+        return firebaseConfig.oAuthClientId || '';
+      } catch {
+        return '';
+      }
+    })();
   if (!clientId) throw new Error('Falta oAuthClientId en la configuración pública de Firebase');
   const redirectUri = 'http://localhost:3000/api/oauth/callback';
   const scope = 'https://www.googleapis.com/auth/drive profile email';
