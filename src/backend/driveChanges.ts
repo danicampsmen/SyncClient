@@ -14,6 +14,8 @@ export interface DriveChangesOptions {
   corpusId: string;
   driveId?: string;
   corpus?: string;
+  forceRescan?: boolean;
+  persistCursor?: boolean;
   includeItemsFromAllDrives?: boolean;
   supportsAllDrives?: boolean;
   pageSize?: number;
@@ -88,7 +90,7 @@ export class DriveChangesIngestor {
       corpus_id: options.corpusId,
       drive_id: options.driveId ?? 'my-drive',
     } as const;
-    const existing = this.storage.getDriveCursor(key);
+    const existing = options.forceRescan ? null : this.storage.getDriveCursor(key);
     const pageToken = existing?.page_token ?? await this.getStartPageToken(options);
     let nextToken: string | undefined = pageToken;
     let finalToken: string | undefined;
@@ -116,7 +118,9 @@ export class DriveChangesIngestor {
       last_success_at: Date.now(),
       status: 'active',
     };
-    this.storage.setDriveCursor(cursor);
+    if (options.persistCursor !== false) {
+      this.storage.setDriveCursor(cursor);
+    }
     return { appliedChanges, pageCount, pageToken: finalToken };
   }
 
@@ -132,7 +136,11 @@ export class DriveChangesIngestor {
   private async listChanges(options: DriveChangesOptions, pageToken: string): Promise<ChangesListResponse> {
     const params = this.sharedParams(options);
     params.set('pageToken', pageToken);
-    params.set('fields', options.fields ?? 'nextPageToken,newStartPageToken,changes(fileId,removed,file,changeType)');
+    params.set(
+      'fields',
+      options.fields
+        ?? 'nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,modifiedTime,size,md5Checksum,webViewLink,appProperties,parents),changeType)',
+    );
     return this.requestJson<ChangesListResponse>(`${DRIVE_API}/changes?${params.toString()}`);
   }
 

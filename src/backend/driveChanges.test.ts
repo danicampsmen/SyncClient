@@ -49,6 +49,46 @@ describe('DriveChangesIngestor', () => {
     expect(db.setDriveCursor).not.toHaveBeenCalled();
   });
 
+  it('can restart from a fresh start token without deleting the previous cursor', async () => {
+    const previous: DriveCursor = {
+      pair_id: 'p',
+      account_id: 'a',
+      corpus_id: 'user',
+      drive_id: 'my-drive',
+      page_token: 'expired',
+      last_success_at: null,
+      status: 'rescan_required',
+    };
+    const db = storage(previous);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'fresh-start' }))
+      .mockResolvedValueOnce(response({ changes: [], newStartPageToken: 'fresh-final' }));
+
+    await new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user', forceRescan: true },
+      vi.fn(),
+    );
+
+    expect(new URL(fetcher.mock.calls[0][0]).pathname).toContain('/changes/startPageToken');
+    expect(db.setDriveCursor).toHaveBeenCalledWith(expect.objectContaining({ page_token: 'fresh-final' }));
+    expect(previous.page_token).toBe('expired');
+  });
+
+  it('can defer cursor persistence until the caller commits applied work', async () => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ changes: [{ fileId: 'a' }], newStartPageToken: 'final' }));
+
+    const result = await new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user', persistCursor: false },
+      vi.fn(),
+    );
+
+    expect(result.pageToken).toBe('final');
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+
   it('retries transient errors and honors Retry-After', async () => {
     const db = storage();
     const delays: number[] = [];

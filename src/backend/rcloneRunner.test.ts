@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ChildProcess } from 'node:child_process';
 import { RcloneRunner } from './rcloneRunner';
+import { acquirePairLock, PairAlreadyRunningError } from './pairProcessLock';
 import { RclonePairConfig } from '../shared/rcloneConfig';
 
 const temporaryDirectories: string[] = [];
@@ -68,5 +69,18 @@ describe('RcloneRunner', () => {
 
     await expect(runner.run(config(directory))).rejects.toThrow('not found');
     await expect(runner.run(config(directory))).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it('shares the pair lock with the native engine', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'syncclient-rclone-'));
+    temporaryDirectories.push(directory);
+    const nativeLock = await acquirePairLock(directory, 'pair-a');
+    const spawn = (): ChildProcess => {
+      throw new Error('rclone must not start while native sync owns the pair');
+    };
+    const runner = new RcloneRunner(spawn);
+
+    await expect(runner.run(config(directory))).rejects.toBeInstanceOf(PairAlreadyRunningError);
+    await nativeLock.release();
   });
 });

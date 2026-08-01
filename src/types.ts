@@ -56,6 +56,7 @@ export interface SyncPair {
   status: SyncStatus;
   lastSynced: number | null;
   accountId?: string;
+  driveId?: string;
   syncMode?: SyncMode; // Por defecto 'mirror' (Duplicado) para máxima velocidad offline
   cloudCategory?: CloudCategory; // 'computers' para ordenar en Ordenadores/[equipo], 'shared' para carpetas colaborativos
   deviceName?: string; // e.g., 'fayfer-pc' o 'Tableta Android StarNote'
@@ -85,4 +86,3 @@ export interface PendingConflict {
   remoteMtime: number;
   timestamp: number;
 }
-

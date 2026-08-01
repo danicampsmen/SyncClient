@@ -7,12 +7,14 @@ import { Readable } from 'stream';
 import chokidar, { FSWatcher } from 'chokidar';
 import { SyncPair, SyncEvent, SyncSettings, PendingConflict, ExternalDriveAlert } from '../types';
 import { CoreSyncLogic, RemoteEntry, SyncPlan, SyncStateSnapshot } from '../shared/CoreSyncLogic';
-import { USE_V2_SYNC, FileState, SyncJournalEntry } from '../shared/schema';
+import { USE_V2_SYNC, FileState, SyncJournalEntry, DriveCursor } from '../shared/schema';
 import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager, VectorClock } from '../shared/VectorClock';
 import { scanChanges, computeBlockHashes, lazyHashBatch, isMtimeChanged, hasContentChanged, verifyReadWriteAccess, LocalEntry, ScanResult } from '../shared/Scanner';
 import { downloadToAtomicFile, requestTransfer, RESUMABLE_UPLOAD_THRESHOLD, uploadResumableFile, type TransferHttpClient } from './transfer';
+import { acquirePairLock, PairAlreadyRunningError, type PairLock } from './pairProcessLock';
+import { DriveChangesIngestor, DriveCursorRescanRequiredError, type DriveChange } from './driveChanges';
 import {
   INITIAL_POLL_INTERVAL_MS,
   SYNC_DEBOUNCE_MS,
@@ -33,6 +35,7 @@ export interface DriveFile {
   webViewLink?: string;
   md5Checksum?: string;
   appProperties?: Record<string, string>;
+  parents?: string[];
 }
 
 function matchesIgnorePattern(name: string, patterns?: string[]): boolean {
@@ -54,7 +57,13 @@ interface ManifestEntry {
   remoteId: string;
 }
 
-class SyncEngine {
+export const DRIVE_CHANGES_FEATURE_FLAG = 'SYNCCLIENT_DRIVE_CHANGES';
+
+export function isDriveChangesFeatureEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment[DRIVE_CHANGES_FEATURE_FLAG] === 'true';
+}
+
+export class SyncEngine {
   private pairs: SyncPair[] = [];
   private events: SyncEvent[] = [];
   private settings: SyncSettings = {
@@ -96,6 +105,8 @@ class SyncEngine {
   private readonly DRIVE_MIN_REQUEST_INTERVAL_MS = 200;
   private driveRequestTail: Promise<void> = Promise.resolve();
   private nextDriveRequestAt = 0;
+  private readonly driveCursorRescans = new Set<string>();
+  private readonly driveChangesCacheReady = new Set<string>();
 
   private async runInPool<T>(tasks: (() => Promise<T>)[], concurrency = 3): Promise<T[]> {
     const results: T[] = new Array(tasks.length);
@@ -167,7 +178,9 @@ class SyncEngine {
         if (!this.isTransientDriveStatus(response.status) || attempt === maxAttempts) {
           return response;
         }
-        await response.body?.cancel().catch(() => { });
+        await response.body?.cancel().catch(error => {
+          console.debug('[SyncEngine/Drive] Could not cancel transient response body before retry:', error instanceof Error ? error.message : String(error));
+        });
         lastError = new Error(`Drive API transient error (${response.status})`);
       } catch (error) {
         lastError = error;
@@ -224,10 +237,12 @@ class SyncEngine {
                 console.log(`[SyncEngine] Migrated ${Object.keys(jsonManifests).length} pairs from JSON to SQLite`);
               }
             }
-          } catch { }
+          } catch (error) {
+            console.warn('[SyncEngine] Legacy manifest migration skipped; SQLite state is preserved:', error instanceof Error ? error.message : String(error));
+          }
         }
-      } catch (e: any) {
-        console.warn('[SyncEngine] DB init failed, using JSON only:', e?.message || e);
+      } catch (e: unknown) {
+        console.warn('[SyncEngine] DB init failed, using JSON only:', e instanceof Error ? e.message : String(e));
       }
 
       try {
@@ -244,7 +259,11 @@ class SyncEngine {
         }
         if (parsed.manifests && !this.db) this.manifests = parsed.manifests;
         if (parsed.pendingConflicts) this.pendingConflicts = parsed.pendingConflicts;
-      } catch (e: any) { }
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.warn('[SyncEngine] State file could not be loaded; keeping defaults:', e instanceof Error ? e.message : String(e));
+        }
+      }
 
       if (this.pairs.length > 0) {
         let modified = false;
@@ -264,6 +283,7 @@ class SyncEngine {
         });
         if (modified) await this.saveState();
       }
+      await this.recoverPendingWork();
       this.refreshWatchers();
       this.refreshIntervals();
       this.startExternalDriveMonitor();
@@ -292,6 +312,142 @@ class SyncEngine {
     return false;
   }
 
+  private sharedPairLockDirectory(): string {
+    return path.join(this.configDir, 'pair-locks');
+  }
+
+  private isDriveChangesEnabled(): boolean {
+    return isDriveChangesFeatureEnabled();
+  }
+
+  private async recoverPendingWork(): Promise<void> {
+    if (!this.db) return;
+
+    for (const pair of this.pairs) {
+      const operations = this.db.getRecoverableOperations(pair.id);
+      const journalEntries = this.db.getPendingJournalEntries(pair.id);
+      if (operations.length === 0 && journalEntries.length === 0) continue;
+
+      const detail = `Recovery queued: ${operations.length} operation(s), ${journalEntries.length} pending journal entr${journalEntries.length === 1 ? 'y' : 'ies'}`;
+      console.warn(`[SyncEngine/Recovery] pair=${pair.id} ${detail}`);
+      this.addEvent({
+        id: Math.random().toString(36).slice(2, 11),
+        pairId: pair.id,
+        filename: pair.localPath,
+        action: 'info',
+        timestamp: Date.now(),
+        details: detail,
+      }, true);
+
+      if (pair.status === 'error') pair.status = 'idle';
+      if (pair.status !== 'paused' && pair.status !== 'unauthenticated' && this.accessToken) {
+        await this.triggerSync(pair.id);
+      }
+    }
+  }
+
+  private applyDriveChange(pairId: string, change: DriveChange): void {
+    if (change.removed) {
+      for (const [folderId, cached] of this.driveFolderCache) {
+        const next = cached.files.filter(file => file.id !== change.fileId);
+        if (next.length !== cached.files.length) {
+          this.driveFolderCache.set(folderId, { ...cached, files: next });
+        }
+      }
+      return;
+    }
+
+    const rawFile = change.file;
+    if (!rawFile || typeof rawFile.id !== 'string' || typeof rawFile.name !== 'string'
+      || typeof rawFile.mimeType !== 'string' || typeof rawFile.modifiedTime !== 'string') {
+      throw new Error(`Incomplete Drive change for pair ${pairId}: ${change.fileId}`);
+    }
+
+    const file: DriveFile = {
+      id: rawFile.id,
+      name: rawFile.name,
+      mimeType: rawFile.mimeType,
+      modifiedTime: rawFile.modifiedTime,
+      size: typeof rawFile.size === 'string' ? rawFile.size : undefined,
+      webViewLink: typeof rawFile.webViewLink === 'string' ? rawFile.webViewLink : undefined,
+      md5Checksum: typeof rawFile.md5Checksum === 'string' ? rawFile.md5Checksum : undefined,
+      appProperties: typeof rawFile.appProperties === 'object' && rawFile.appProperties !== null
+        ? rawFile.appProperties as Record<string, string>
+        : undefined,
+      parents: Array.isArray(rawFile.parents) ? rawFile.parents.filter((parent): parent is string => typeof parent === 'string') : undefined,
+    };
+
+    for (const [folderId, cached] of this.driveFolderCache) {
+      const withoutChange = cached.files.filter(candidate => candidate.id !== file.id);
+      if (withoutChange.length !== cached.files.length) {
+        this.driveFolderCache.set(folderId, { ...cached, files: withoutChange });
+      }
+      if (file.parents?.includes(folderId)) {
+        this.driveFolderCache.set(folderId, { ...this.driveFolderCache.get(folderId)!, files: [...withoutChange, file] });
+      }
+    }
+    console.debug(`[SyncEngine/DriveChanges] Applied change ${change.fileId} for pair ${pairId}`);
+  }
+
+  private async ingestDriveChanges(pair: SyncPair): Promise<{ pageToken: string; controlledRescan: boolean } | null> {
+    if (!this.isDriveChangesEnabled() || !this.db || !this.accessToken || !pair.accountId) return null;
+
+    const driveId = pair.driveId ?? 'my-drive';
+    const cursorKey = {
+      pair_id: pair.id,
+      account_id: pair.accountId,
+      corpus_id: pair.cloudCategory === 'shared' ? 'drive' : 'user',
+      drive_id: driveId,
+    } as const;
+    const existingCursor = this.db.getDriveCursor(cursorKey);
+    const forceRescan = this.driveCursorRescans.has(pair.id) || existingCursor?.status === 'rescan_required';
+    const ingestor = new DriveChangesIngestor(
+      this.db,
+      (url, init) => this.driveRequest(url, init ?? {}, this.DRIVE_MAX_ATTEMPTS),
+      this.accessToken,
+    );
+    const options = {
+      pairId: pair.id,
+      accountId: pair.accountId,
+      corpusId: pair.cloudCategory === 'shared' ? 'drive' : 'user',
+      corpus: pair.cloudCategory === 'shared' ? 'drive' : 'user',
+      driveId: pair.cloudCategory === 'shared' ? pair.driveId : undefined,
+      forceRescan,
+      persistCursor: false,
+    };
+
+    try {
+      const result = await ingestor.ingest(options, change => this.applyDriveChange(pair.id, change));
+      this.driveCursorRescans.delete(pair.id);
+      this.driveChangesCacheReady.add(pair.id);
+      console.log(`[SyncEngine/DriveChanges] pair=${pair.id} pages=${result.pageCount} changes=${result.appliedChanges}`);
+      return { pageToken: result.pageToken, controlledRescan: forceRescan };
+    } catch (error) {
+      if (error instanceof DriveCursorRescanRequiredError) {
+        this.driveCursorRescans.add(pair.id);
+        const cursor = this.db.getDriveCursor(cursorKey);
+        if (cursor) this.db.setDriveCursor({ ...cursor, status: 'rescan_required' });
+        console.warn(`[SyncEngine/DriveChanges] pair=${pair.id} cursor invalid; controlled rescan retained local state`);
+        return null;
+      }
+      console.error(`[SyncEngine/DriveChanges] pair=${pair.id} ingestion failed; cursor was not advanced:`, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  private commitDriveChangesCursor(pair: SyncPair, pageToken: string): void {
+    if (!this.db || !pair.accountId) return;
+    this.db.setDriveCursor({
+      pair_id: pair.id,
+      account_id: pair.accountId,
+      corpus_id: pair.cloudCategory === 'shared' ? 'drive' : 'user',
+      drive_id: pair.driveId ?? 'my-drive',
+      page_token: pageToken,
+      last_success_at: Date.now(),
+      status: 'active',
+    } satisfies DriveCursor);
+  }
+
   private async saveState() {
     try {
       await fs.mkdir(this.configDir, { recursive: true });
@@ -299,7 +455,9 @@ class SyncEngine {
       const tmpFile = `${this.configFile}.tmp.${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
       await fs.writeFile(tmpFile, JSON.stringify(data, null, 2), 'utf8');
       await fs.rename(tmpFile, this.configFile);
-    } catch (err) { }
+    } catch (err) {
+      console.error('[SyncEngine] State persistence failed; the current state remains in memory:', err instanceof Error ? err.message : String(err));
+    }
   }
 
   public setToken(accessToken: string | null, refreshToken?: string | null) {
@@ -331,7 +489,10 @@ class SyncEngine {
         return true;
       }
       return false;
-    } catch { return false; }
+    } catch (error) {
+      console.warn('[SyncEngine/Auth] Access-token refresh failed; queued work remains recoverable:', error instanceof Error ? error.message : String(error));
+      return false;
+    }
   }
 
   public getToken(): string | null { return this.accessToken; }
@@ -364,7 +525,11 @@ class SyncEngine {
               }
             }
           }
-        } catch { }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.debug(`[SyncEngine/ExternalDrive] Could not inspect ${base}:`, error instanceof Error ? error.message : String(error));
+          }
+        }
       }
     }, 5000);
   }
@@ -511,11 +676,17 @@ class SyncEngine {
               await fs.writeFile(stubPath, stubContent, 'utf8');
               this.markSelfWritten(stubPath);
               this.markSelfWritten(fullPath);
-              await fs.unlink(fullPath).catch(() => null);
+              try {
+                await fs.unlink(fullPath);
+              } catch (error) {
+                console.warn(`[SyncEngine/Dehydrate] Could not remove source file ${fullPath}; stub retained for recovery:`, error instanceof Error ? error.message : String(error));
+              }
             }
           }
         }
-      } catch (e) { }
+      } catch (error) {
+        console.error(`[SyncEngine/Dehydrate] Could not process ${dir}; remaining files were left untouched:`, error instanceof Error ? error.message : String(error));
+      }
     };
     await dehydrateDir(pair.localPath, '');
     pair.syncMode = 'streaming';
@@ -542,12 +713,20 @@ class SyncEngine {
                 const targetRealPath = path.join(dir, realFileName);
                 await this.downloadDriveBinary(stub.id, targetRealPath, stub.modifiedTime || new Date().toISOString());
                 this.markSelfWritten(fullPath);
-                await fs.unlink(fullPath).catch(() => null);
+                try {
+                  await fs.unlink(fullPath);
+                } catch (error) {
+                  console.warn(`[SyncEngine/Hydrate] Could not remove stub ${fullPath} after download:`, error instanceof Error ? error.message : String(error));
+                }
               }
-            } catch (err) { }
+            } catch (error) {
+              console.error(`[SyncEngine/Hydrate] Could not hydrate ${fullPath}; stub remains for retry:`, error instanceof Error ? error.message : String(error));
+            }
           }
         }
-      } catch (e) { }
+      } catch (error) {
+        console.error(`[SyncEngine/Hydrate] Could not process ${dir}; remaining stubs were left for recovery:`, error instanceof Error ? error.message : String(error));
+      }
     };
     await hydrateDir(pair.localPath, '');
     pair.syncMode = 'mirror';
@@ -584,7 +763,9 @@ class SyncEngine {
 
           watcher.on('error', (error) => {
             if (this.watchers[pair.id]) {
-              this.watchers[pair.id].close().catch(() => { });
+              this.watchers[pair.id].close().catch(error => {
+                console.warn(`[SyncEngine/Watcher] Could not close failed watcher for pair ${pair.id}:`, error instanceof Error ? error.message : String(error));
+              });
               delete this.watchers[pair.id];
             }
             const retries = (this.watcherRetryCount[pair.id] || 0) + 1;
@@ -597,7 +778,9 @@ class SyncEngine {
 
           this.watchers[pair.id] = watcher;
           this.watcherRetryCount[pair.id] = 0;
-        } catch (err) { }
+        } catch (error) {
+          console.error(`[SyncEngine/Watcher] Could not create watcher for pair ${pair.id}; retrying on the next refresh:`, error instanceof Error ? error.message : String(error));
+        }
       } else if (!shouldWatch && this.watchers[pair.id]) {
         this.watchers[pair.id].close();
         delete this.watchers[pair.id];
@@ -663,7 +846,10 @@ class SyncEngine {
     pair.status = 'syncing';
     pair.progress = { currentFile: 'Verificando carpetas y duplicados...', totalFiles: 0, currentFileIndex: 0, bytesTransferred: 0, totalBytes: 0, percentage: 0, action: 'comprobando' };
 
+    let pairLock: PairLock | null = null;
+    let driveChangeBatch: { pageToken: string; controlledRescan: boolean } | null = null;
     try {
+      pairLock = await acquirePairLock(this.sharedPairLockDirectory(), pairId);
       let remoteFolderId = 'root';
       let remotePathParts = pair.remotePath.replace(/^(RemoteServer|GoogleDrive|Drive):/, '').replace(/^[\/\\]+/, '').split('/').filter(Boolean);
 
@@ -681,8 +867,19 @@ class SyncEngine {
 
       await fs.mkdir(pair.localPath, { recursive: true });
 
-      if (USE_V2_SYNC && this.db && this.DEVICE_ID) {
-        await this.v2SyncDirectoryTree(pair.localPath, remoteFolderId, pair, '');
+      if ((USE_V2_SYNC || this.isDriveChangesEnabled()) && this.db && this.DEVICE_ID) {
+        driveChangeBatch = await this.ingestDriveChanges(pair);
+        const syncCompleted = await this.v2SyncDirectoryTree(pair.localPath, remoteFolderId, pair, '');
+        if (!syncCompleted) {
+          if ((pair.status as string) === 'paused') return;
+          throw new Error('Native sync did not complete; pending work was retained');
+        }
+        if (syncCompleted && driveChangeBatch) {
+          if (driveChangeBatch.controlledRescan) {
+            console.log(`[SyncEngine/DriveChanges] pair=${pair.id} controlled rescan completed before cursor commit`);
+          }
+          this.commitDriveChangesCursor(pair, driveChangeBatch.pageToken);
+        }
       } else {
         if (!this.manifests[pair.id]) this.manifests[pair.id] = {};
         await this.syncDirectoryTree(pair.localPath, remoteFolderId, pair, '');
@@ -705,14 +902,35 @@ class SyncEngine {
       
       setTimeout(() => { if (pair && pair.status === 'idle') { pair.progress = null; this.saveState(); } }, 4000);
       await this.saveState();
-    } catch (err: any) {
-      if (err.message === 'UNAUTHORIZED_EXPIRED_TOKEN') pair.status = 'unauthenticated';
+    } catch (err: unknown) {
+      if (err instanceof PairAlreadyRunningError) {
+        console.warn(`[SyncEngine/Lock] pair=${pairId} is already active in another engine; work remains queued`);
+        pair.status = 'idle';
+      } else if (err instanceof Error && err.message === 'UNAUTHORIZED_EXPIRED_TOKEN') pair.status = 'unauthenticated';
       else pair.status = 'error';
       pair.progress = null;
+      if (!(err instanceof PairAlreadyRunningError)) {
+        console.error(`[SyncEngine] pair=${pairId} sync failed; recoverable state was retained:`, err instanceof Error ? err.message : String(err));
+        this.addEvent({
+          id: Math.random().toString(36).slice(2, 11), pairId, filename: pair.localPath,
+          action: 'info', timestamp: Date.now(),
+          details: `Synchronization failed: ${err instanceof Error ? err.message : String(err)}`,
+        }, true);
+      }
       await this.saveState();
     } finally {
+      if (pairLock) {
+        try {
+          await pairLock.release();
+        } catch (error) {
+          console.error(`[SyncEngine/Lock] Could not release pair ${pairId}; manual recovery may be required:`, error instanceof Error ? error.message : String(error));
+        }
+      }
       this.activeSyncs.delete(pairId);
-      this.driveFolderCache.clear();
+      if (!this.isDriveChangesEnabled()) {
+        this.driveFolderCache.clear();
+        this.driveChangesCacheReady.delete(pairId);
+      }
 
       this.lastSyncCompleted[pairId] = Date.now();
       const filesProcessed = pair.progress?.currentFileIndex ?? 0;
@@ -756,19 +974,26 @@ class SyncEngine {
     return operationId;
   }
 
-  private async v2SyncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = '') {
-    if (!this.db || !this.DEVICE_ID) return;
+  private async v2SyncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = ''): Promise<boolean> {
+    if (!this.db || !this.DEVICE_ID) return false;
 
-    await this.reconcileWithHttp304(pair.id, remoteFolderId);
+    if (!this.isDriveChangesEnabled()) {
+      await this.reconcileWithHttp304(pair.id, remoteFolderId);
+    }
 
     const dbState = this.db.getFolderState(pair.id);
     const scanResult = await scanChanges(localDir, dbState, fs, pair.id);
     if (scanResult === 'PERMISSION_DENIED') {
       pair.status = 'error' as any;
-      return;
+      return false;
     }
 
-    const remoteFiles = await this.listDriveFiles(remoteFolderId, true);
+    const remoteFiles = await this.listDriveFiles(
+      remoteFolderId,
+      !this.isDriveChangesEnabled()
+        || this.driveCursorRescans.has(pair.id)
+        || !this.driveChangesCacheReady.has(pair.id),
+    );
 
     const localSnapshot = new Map<string, { name: string; mtime: number; size: number }>();
     
@@ -840,9 +1065,10 @@ class SyncEngine {
     const completedDownloads = new Set<string>();
     const uploadCommits: Array<{ journalId: number; operationId: string | null }> = [];
     const downloadCommits: Array<{ journalId: number; operationId: string | null }> = [];
+    let hadFailures = false;
 
     for (const upload of plan.uploads) {
-      if ((pair.status as string) === 'paused') return;
+      if ((pair.status as string) === 'paused') return false;
       const fullLocalPath = path.join(localDir, upload.localPath);
       const journalId = this.db.journalStart(pair.id, 'upload_start', upload.localPath, upload.remoteId);
       const operationId = this.beginTransferOperation(pair.id, upload.localPath, 'upload', upload.remoteId || null);
@@ -851,6 +1077,7 @@ class SyncEngine {
         try {
           stats = await fs.stat(fullLocalPath);
         } catch (error) {
+          hadFailures = true;
           this.db.journalFail(journalId);
           if (operationId) this.db.updateOperation(operationId, {
             status: 'retry', last_error: error instanceof Error ? error.message : String(error), updated_at: Date.now(),
@@ -880,6 +1107,7 @@ class SyncEngine {
           filename: upload.remoteName, action: 'uploaded', timestamp: Date.now()
         }, true);
       } catch (e: any) {
+        hadFailures = true;
         this.db.journalFail(journalId);
         if (operationId) this.db.updateOperation(operationId, {
           status: 'retry', last_error: e instanceof Error ? e.message : String(e), updated_at: Date.now(),
@@ -895,7 +1123,7 @@ class SyncEngine {
 
     const downloadedLocalMtimes = new Map<string, number>();
     for (const download of plan.downloads) {
-      if ((pair.status as string) === 'paused') return;
+      if ((pair.status as string) === 'paused') return false;
       const fullLocalPath = path.join(localDir, download.localPath);
       const journalId = this.db.journalStart(pair.id, 'download_start', download.localPath, download.remoteFile.id);
       const operationId = this.beginTransferOperation(pair.id, download.localPath, 'download', download.remoteFile.id);
@@ -914,6 +1142,7 @@ class SyncEngine {
           filename: download.remoteFile.name, action: 'downloaded', timestamp: Date.now()
         }, true);
       } catch (e: any) {
+        hadFailures = true;
         this.db.journalFail(journalId);
         if (operationId) this.db.updateOperation(operationId, {
           status: 'retry', last_error: e instanceof Error ? e.message : String(e), updated_at: Date.now(),
@@ -928,24 +1157,26 @@ class SyncEngine {
     }
 
     for (const del of plan.deleteLocal) {
-      if ((pair.status as string) === 'paused') return;
+      if ((pair.status as string) === 'paused') return false;
       const fullLocalPath = path.join(localDir, del.localPath);
       const journalId = this.db.journalStart(pair.id, 'delete_local_start', del.localPath);
       try {
         this.markSelfWritten(fullLocalPath);
-        await fs.rm(fullLocalPath, { force: true }).catch(() => { });
+        await fs.rm(fullLocalPath, { force: true });
         this.db.journalDone(journalId);
         this.addEvent({
           id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
           filename: del.localPath, action: 'deleted', timestamp: Date.now(), details: 'Eliminado localmente'
         }, true);
-      } catch (e: any) {
+      } catch (e: unknown) {
+        hadFailures = true;
         this.db.journalFail(journalId);
+        console.error(`[SyncEngine] Local delete failed for ${del.localPath}; journal retained as failed:`, e instanceof Error ? e.message : String(e));
       }
     }
 
     for (const del of plan.deleteRemote) {
-      if ((pair.status as string) === 'paused') return;
+      if ((pair.status as string) === 'paused') return false;
       const journalId = this.db.journalStart(pair.id, 'delete_remote_start', del.localPath, del.remoteId);
       try {
         await this.deleteDriveFile(del.remoteId, remoteFolderId);
@@ -954,10 +1185,13 @@ class SyncEngine {
           id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
           filename: del.localPath, action: 'deleted', timestamp: Date.now(), details: 'Eliminado en Drive'
         }, true);
-      } catch (e: any) {
+      } catch (e: unknown) {
         this.db.journalFail(journalId);
-        if (e.message?.includes('404') || e.message?.includes('File not found')) {
+        if (e instanceof Error && (e.message.includes('404') || e.message.includes('File not found'))) {
            this.db.journalDone(journalId);
+        } else {
+          hadFailures = true;
+          console.error(`[SyncEngine] Remote delete failed for ${del.localPath}; journal retained as failed:`, e instanceof Error ? e.message : String(e));
         }
       }
     }
@@ -1003,20 +1237,37 @@ class SyncEngine {
     }
 
     const subDirs = remoteFiles.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
-    const localDirs = await fs.readdir(localDir, { withFileTypes: true }).catch(() => [] as Dirent[]);
+    let localDirs: Dirent[];
+    try {
+      localDirs = await fs.readdir(localDir, { withFileTypes: true });
+    } catch (error) {
+      console.error(`[SyncEngine] Could not read local directory ${localDir}; retaining pending work and skipping destructive planning:`, error instanceof Error ? error.message : String(error));
+      return false;
+    }
     const dirNames = new Set<string>();
     for (const dir of localDirs) { if (dir.isDirectory()) dirNames.add(dir.name); }
     for (const dir of remoteFiles) { if (dir.mimeType === 'application/vnd.google-apps.folder') dirNames.add(dir.name); }
 
     for (const dirName of dirNames) {
-      if ((pair.status as string) === 'paused') return;
+      if ((pair.status as string) === 'paused') return false;
       const subDir = path.join(localDir, dirName);
       const subPrefix = path.join(relativePrefix, dirName);
       const subRemoteFolder = subDirs.find(d => d.name === dirName);
       if (subRemoteFolder) {
-        await fs.mkdir(subDir, { recursive: true }).catch(() => { });
-        await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix);
+        try {
+          await fs.mkdir(subDir, { recursive: true });
+        } catch (error) {
+          console.error(`[SyncEngine] Could not create local directory ${subDir}; keeping its work recoverable:`, error instanceof Error ? error.message : String(error));
+          continue;
+        }
+        const childCompleted = await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix);
+        if (!childCompleted) return false;
       }
+    }
+
+    if (hadFailures) {
+      console.warn(`[SyncEngine] pair=${pair.id} retained incomplete transfer state; cursor will not advance`);
+      return false;
     }
 
     this.db.commitTransfer(
@@ -1028,6 +1279,7 @@ class SyncEngine {
         .filter((operationId): operationId is string => operationId !== null),
     );
     this.db.vacuum();
+    return true;
   }
 
   private async reconcileWithHttp304(pairId: string, remoteFolderId: string): Promise<void> {
@@ -1060,7 +1312,9 @@ class SyncEngine {
           };
           this.db.setFileState(pairId, relPath, updatedState);
         }
-      } catch (e: any) { }
+      } catch (e: unknown) {
+        console.warn(`[SyncEngine/Reconcile] Could not refresh remote metadata for ${relPath}; preserving existing state:`, e instanceof Error ? e.message : String(e));
+      }
     }
 
     for (const relPath of pendingDeletes) {

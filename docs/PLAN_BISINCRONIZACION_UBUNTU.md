@@ -99,6 +99,10 @@ debe asumir que rclone está instalado o disponible.
 La selección de módulo debe ser explícita por pareja y persistir solo como
 configuración de control, nunca como estado compartido de sincronización. La UI
 debe bloquear la ejecución simultánea de ambos módulos sobre la misma pareja.
+El motor nativo y `RcloneRunner` usan la misma primitiva de lock por pareja. La
+configuración rclone debe apuntar `lockDirectory` a
+`~/.config/syncclient/pair-locks` (o al directorio equivalente configurado para
+el motor nativo); no se eliminan locks abandonados automáticamente.
 No se permite cambiar de módulo durante una operación ni hacer fallback
 silencioso después de un error parcial: se debe detener, conservar el estado,
 mostrar el error y pedir una acción explícita.
@@ -526,10 +530,14 @@ Estado actual de la fase:
   sesiones resumables, conflictos y versiones de archivos.
 - `SQLiteBackend` y `JSONBackend` exponen el contrato de persistencia ampliado.
 - Las operaciones `running` se recuperan como `retry` al reiniciar.
+- El motor nativo reconcilia al arrancar las operaciones `pending`/`retry` y
+  las entradas de journal pendientes; conserva el estado y registra la
+  recuperación para que el siguiente ciclo pueda reintentarlo.
 - Desktop crea un backup mediante la API de backup de SQLite y verifica
   `integrity_check`; WASM mantiene checkpoint temporal, backup y verificacion.
-- La cola todavía no ejecuta transferencias ni confirma cursores: eso pertenece a
-  las fases de `changes.list` y transferencias.
+- El motor nativo consume las operaciones recuperables durante el siguiente
+  ciclo; la confirmación del cursor queda condicionada a completar el árbol y
+  sus transferencias.
 
 ## Fase 2 - Changes API
 
@@ -552,8 +560,10 @@ Estado actual de la fase:
   borrar el estado local.
 - Incluye parametros para unidades compartidas y reintentos acotados de 429,
   5xx y errores de red.
-- La integracion con `syncEngine.ts` y la aplicacion de cambios sobre archivos
-  se dejan para la siguiente fase, junto con las transferencias.
+- `syncEngine.ts` integra el ingestor detrás de `SYNCCLIENT_DRIVE_CHANGES=true`.
+  El cursor solo se confirma tras aplicar todas las páginas; un cursor inválido
+  conserva el estado local, activa un rescan controlado y difiere la confirmación
+  del cursor hasta completar el ciclo nativo.
 
 ## Fase 3 - Transferencias
 
@@ -562,8 +572,9 @@ Estado actual de la fase:
 - [Completada] Consulta de `Range` despues de interrupciones y reanudacion tras reinicio.
 - [Completada] Descarga a temporal unico, verificacion de tamaño/MD5 y rename atomico.
 - [Completada] Reintentos limitados para 401, 429, errores 5xx y fallos de red.
-- Pendiente: integrar el ingestor `changes.list` con el motor principal y ampliar
-  la validacion de fallos de extremo a extremo.
+- [Completada] El motor nativo comparte el lock por pareja con el adaptador
+  rclone; las transferencias siguen fuera de transacciones SQLite.
+- Pendiente: ampliar la validacion de fallos de extremo a extremo.
 
 ## Fase 4 - Planificacion y conflictos
 
@@ -589,8 +600,9 @@ Estado actual de la fase:
   minutos y cooldown obligatorio de 60 segundos.
 - [Completada] Invalidar la cache de carpetas tras cada sincronizacion y evitar
   timers de polling huerfanos cuando una pareja deja de estar activa.
-- Pendiente: sustituir el listado recursivo por `changes.list` en el flujo
-  principal para reducir rescans completos.
+- [Completada] Integrar `changes.list` de forma reversible con
+  `SYNCCLIENT_DRIVE_CHANGES`; la cache se actualiza con cambios y el listado
+  recursivo queda como rescan inicial o controlado.
 
 ## Fase 6 - Validacion de fallos
 

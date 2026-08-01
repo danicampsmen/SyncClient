@@ -90,6 +90,20 @@ describe('SQLiteBackend Phase 1 persistence', () => {
         expect(restarted.getRecoverableOperations('pair-1')[0]?.status).toBe('retry');
     });
 
+    it('keeps pending journal entries available for startup reconciliation', async () => {
+        const directory = await mkdtemp(path.join(os.tmpdir(), 'syncclient-storage-'));
+        temporaryDirectories.push(directory);
+        const first = new SQLiteBackend(directory);
+        await first.init();
+        const journalId = first.journalStart('pair-1', 'upload_start', 'notes/pending.pdf');
+        expect(first.getPendingJournalEntries('pair-1')).toHaveLength(1);
+
+        const restarted = new SQLiteBackend(directory);
+        await restarted.init();
+
+        expect(restarted.getPendingJournalEntries('pair-1')[0]?.id).toBe(journalId);
+    });
+
     it('commits file state, journal, and operation completion together', async () => {
         const directory = await mkdtemp(path.join(os.tmpdir(), 'syncclient-storage-'));
         temporaryDirectories.push(directory);
