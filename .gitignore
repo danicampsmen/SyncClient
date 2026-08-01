@@ -1,44 +1,101 @@
 # Dependencias
 node_modules/
+**/node_modules/
 
-# Build outputs
+# Builds, empaquetados y artefactos generados
 dist/
+build/
 release/
+out/
+.vite/
+.cache/
 *.apk
+*.aab
 *.AppImage
 *.deb
+*.rpm
+*.dmg
+*.exe
+*.msi
+*.zip
+*.tar
+*.gz
+*.asar
 
-# Lockfiles
+# Android y Gradle
+.gradle/
+android/.gradle/
+android/app/build/
+android/build/
+android/capacitor-cordova-android-plugins/
+android/local.properties
+android/**/*.iml
+android/**/captures/
+
+# Electron
+electron-builder/
+electron/dist/
+electron/out/
+*.blockmap
+latest-*.yml
+
+# Lockfiles generados (mantener solo el que se adopte como oficial)
 package-lock.json
 bun.lock
 yarn.lock
+pnpm-lock.yaml
 
-# Archivos temporales y cachés
+# Variables de entorno, credenciales y certificados
+.env
+.env.*
+!.env.example
+firebase-applet-config.json
+google-services.json
+google-services.json.backup
+*.pem
+*.key
+*.keystore
+*.jks
+*.p12
+*.pfx
+credentials.json
+secrets/
+
+# Bases de datos y datos locales
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+userdata/
+
+# Cachés, logs y archivos temporales
+*.log
+logs/
 *.tmp
 *.temp
-*.log
+*.cache
 *.swp
 *.swo
 *~
-.env
-.env.local
-.env.*.local
+.eslintcache
+.tsbuildinfo
+coverage/
+test-results/
 
-# Secretos
-firebase-applet-config.json
-
-# IDEs y editores
+# IDEs y herramientas locales
 .idea/
 .vscode/
 .kilo/
 .aider*
 *.code-workspace
+.claude/
+.cursor/
+.copilot/
 
-# Electron / Capacitor
-electron-builder/
-capacitor-cordova-android-plugins/
-capacitor.config.ts.bak
-
-# Sistema
+# Archivos de sistema
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
