@@ -1,0 +1,44 @@
+# Dependencias
+node_modules/
+
+# Build outputs
+dist/
+release/
+*.apk
+*.AppImage
+*.deb
+
+# Lockfiles
+package-lock.json
+bun.lock
+yarn.lock
+
+# Archivos temporales y cachés
+*.tmp
+*.temp
+*.log
+*.swp
+*.swo
+*~
+.env
+.env.local
+.env.*.local
+
+# Secretos
+firebase-applet-config.json
+
+# IDEs y editores
+.idea/
+.vscode/
+.kilo/
+.aider*
+*.code-workspace
+
+# Electron / Capacitor
+electron-builder/
+capacitor-cordova-android-plugins/
+capacitor.config.ts.bak
+
+# Sistema
+.DS_Store
+Thumbs.db
