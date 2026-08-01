@@ -87,6 +87,8 @@ test-results/
 # IDEs y herramientas locales
 .idea/
 .vscode/
+!.vscode/
+!.vscode/settings.json
 .kilo/
 .aider*
 *.code-workspace

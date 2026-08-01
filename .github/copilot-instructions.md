@@ -1,13 +1,17 @@
-# Instrucciones de contexto para GitHub Copilot
+# Directivas de optimizacion de tokens para GitHub Copilot
 
 Estas directivas aplican a las sugerencias, conversaciones y cambios realizados por
-GitHub Copilot dentro de este repositorio.
+GitHub Copilot dentro de este repositorio. Usar siempre el contexto minimo necesario
+para la solicitud actual y no reescribir archivos completos.
 
-## Objetivo
+## Alcance preferido
 
-Usar únicamente el contexto mínimo necesario para resolver la solicitud actual.
-Priorizar código fuente, pruebas y configuración directamente relacionada con el
-problema. No recopilar indiscriminadamente todo el repositorio.
+- Priorizar `src/`, `electron/` y `server.ts`.
+- Incluir `android/` solo cuando la tarea afecte Capacitor, Android o la paridad
+  entre motores. No excluirlo ciegamente: contiene el segundo motor y su puente.
+- Ignorar por completo dependencias, builds, binarios y datos locales.
+- `package.json`, `tsconfig.json` y configuraciones pequeñas pueden incluirse cuando
+  sean directamente relevantes.
 
 ## Contenido que sí puede entrar en el contexto
 
@@ -82,3 +86,12 @@ necesario para la tarea.
 - Mantener los cambios quirúrgicos y coherentes con las convenciones existentes.
 - Validar con el test, lint o build más pequeño que cubra el cambio.
 - Informar claramente si no fue posible validar algo, sin ocultar errores.
+
+## Ahorro de tokens
+
+- No pegar archivos completos ni explicaciones teóricas largas salvo solicitud
+  explícita.
+- Mostrar solo el bloque modificado, un diff breve o un resumen preciso.
+- Usar referencias explícitas como `#file:server.ts` cuando el usuario limite el
+  alcance.
+- No incluir historial Git, pestañas no relacionadas ni archivos compilados.

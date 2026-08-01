@@ -1,14 +1,15 @@
-# Exclusiones de contexto para Cline
+# Exclusiones de contexto para herramientas Copilot compatibles
 node_modules/
-
 dist/
 release/
 build/
 out/
+.gradle/
 android/.gradle/
 android/app/build/
 android/build/
 electron-builder/
+assets/
 *.apk
 *.aab
 *.AppImage
@@ -21,12 +22,10 @@ electron-builder/
 *.db
 *.sqlite
 *.sqlite3
-
 package-lock.json
 bun.lock
 yarn.lock
 pnpm-lock.yaml
-
 package.json.tmp
 .aider*
 .idea/

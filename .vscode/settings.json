@@ -1,0 +1,27 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/release": true,
+    "**/build": true,
+    "**/out": true,
+    "**/*.AppImage": true,
+    "**/*.apk": true,
+    "**/*.aab": true,
+    "**/*.pdf": true,
+    "**/*.zip": true,
+    "**/package-lock.json": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/release/**": true,
+    "**/build/**": true,
+    "**/out/**": true,
+    "**/.gradle/**": true,
+    "**/android/app/build/**": true
+  },
+  "github.copilot.advanced": {
+    "inlineSuggest.count": 1
+  }
+}
