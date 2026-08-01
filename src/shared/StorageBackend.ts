@@ -31,6 +31,12 @@ export interface IStorageBackend {
     setFileState(pairId: string, relPath: string, state: FileState): void;
     deleteFileState(pairId: string, relPath: string): void;
     updateBatch(pairId: string, updates: Map<string, FileState>): void;
+    commitTransfer(
+        pairId: string,
+        updates: Map<string, FileState>,
+        journalIds: number[],
+        operationIds: string[],
+    ): void;
 
     // Dispositivos
     getDeviceInfo(deviceId: string): DeviceInfo | null;
@@ -373,6 +379,33 @@ export class SQLiteBackend implements IStorageBackend {
         }
     }
 
+    commitTransfer(
+        pairId: string,
+        updates: Map<string, FileState>,
+        journalIds: number[],
+        operationIds: string[],
+    ): void {
+        const commit = () => {
+            this.updateBatch(pairId, updates);
+            for (const journalId of journalIds) this.journalDone(journalId);
+            for (const operationId of operationIds) {
+                this.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
+            }
+        };
+        if (isCapacitor()) {
+            this.db.run('BEGIN');
+            try {
+                commit();
+                this.db.run('COMMIT');
+            } catch (error) {
+                this.db.run('ROLLBACK');
+                throw error;
+            }
+        } else {
+            this.db.transaction(commit)();
+        }
+    }
+
     // ─── Devices ──────────────────────────────────────────────────
 
     getDeviceInfo(deviceId: string): DeviceInfo | null {
@@ -489,10 +522,10 @@ export class SQLiteBackend implements IStorageBackend {
 
     setUploadSession(session: UploadSession): void {
         const sql = `INSERT OR REPLACE INTO upload_sessions
-            (operation_id, remote_id, session_uri, file_size, confirmed_offset, chunk_size, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`;
+            (operation_id, remote_id, session_uri, file_size, confirmed_offset, chunk_size, source_hash, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
         const params = [session.operation_id, session.remote_id, session.session_uri, session.file_size,
-            session.confirmed_offset, session.chunk_size, session.updated_at];
+            session.confirmed_offset, session.chunk_size, session.source_hash, session.updated_at];
         if (isCapacitor()) this.db.run(sql, params);
         else this.db.prepare(sql).run(...params);
     }
@@ -735,6 +768,19 @@ export class JSONBackend implements IStorageBackend {
             }
         }
         this.dirty = true;
+    }
+
+    commitTransfer(
+        pairId: string,
+        updates: Map<string, FileState>,
+        journalIds: number[],
+        operationIds: string[],
+    ): void {
+        this.updateBatch(pairId, updates);
+        for (const journalId of journalIds) this.journalDone(journalId);
+        for (const operationId of operationIds) {
+            this.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
+        }
     }
 
     getDeviceInfo(deviceId: string): DeviceInfo | null {

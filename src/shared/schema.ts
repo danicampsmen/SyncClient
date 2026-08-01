@@ -53,7 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_file_states_pair ON file_states(pair_id);
 CREATE INDEX IF NOT EXISTS idx_file_states_tombstone ON file_states(is_tombstone, updated_at);
 `;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const MIGRATION_SQL: ReadonlyArray<{ version: number; sql: string }> = [
     {
@@ -112,6 +112,13 @@ export const MIGRATION_SQL: ReadonlyArray<{ version: number; sql: string }> = [
             PRIMARY KEY (pair_id, rel_path, hash)
         );
         UPDATE schema_metadata SET value = '2' WHERE key = 'version';
+        `,
+    },
+    {
+        version: 3,
+        sql: `
+        ALTER TABLE upload_sessions ADD COLUMN source_hash TEXT;
+        UPDATE schema_metadata SET value = '3' WHERE key = 'version';
         `,
     },
 ];
@@ -192,6 +199,7 @@ export interface UploadSession {
     file_size: number;
     confirmed_offset: number;
     chunk_size: number;
+    source_hash: string | null;
     updated_at: number;
 }
 

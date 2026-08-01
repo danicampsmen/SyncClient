@@ -557,11 +557,13 @@ Estado actual de la fase:
 
 ## Fase 3 - Transferencias
 
-- Reemplazar la subida Desktop de una sola transmision por chunks.
-- Persistir URI y offset.
-- Consultar `Range` despues de interrupciones.
-- Reanudar despues de reinicio.
-- Mantener descarga temporal, checksum y rename atomico.
+- [Completada] Subida resumable para archivos grandes en chunks de 256 KiB.
+- [Completada] Persistencia de URI, offset, tamaño, chunk y hash fuente.
+- [Completada] Consulta de `Range` despues de interrupciones y reanudacion tras reinicio.
+- [Completada] Descarga a temporal unico, verificacion de tamaño/MD5 y rename atomico.
+- [Completada] Reintentos limitados para 401, 429, errores 5xx y fallos de red.
+- Pendiente: integrar el ingestor `changes.list` con el motor principal y ampliar
+  la validacion de fallos de extremo a extremo.
 
 ## Fase 4 - Planificacion y conflictos
 

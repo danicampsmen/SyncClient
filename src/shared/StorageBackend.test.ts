@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SQLiteBackend } from './StorageBackend';
-import type { SyncOperation } from './schema';
+import type { FileState, SyncOperation } from './schema';
 
 const temporaryDirectories: string[] = [];
 
@@ -52,6 +52,7 @@ describe('SQLiteBackend Phase 1 persistence', () => {
             file_size: 1024,
             confirmed_offset: 0,
             chunk_size: 262144,
+            source_hash: null,
             updated_at: Date.now(),
         });
         backend.setConflict({
@@ -87,5 +88,35 @@ describe('SQLiteBackend Phase 1 persistence', () => {
         await restarted.init();
 
         expect(restarted.getRecoverableOperations('pair-1')[0]?.status).toBe('retry');
+    });
+
+    it('commits file state, journal, and operation completion together', async () => {
+        const directory = await mkdtemp(path.join(os.tmpdir(), 'syncclient-storage-'));
+        temporaryDirectories.push(directory);
+        const backend = new SQLiteBackend(directory);
+        await backend.init();
+        backend.createOperation(operation('running'));
+        const journalId = backend.journalStart('pair-1', 'upload_start', 'notes/a.pdf');
+        const state: FileState = {
+            pair_id: 'pair-1',
+            rel_path: 'notes/a.pdf',
+            remote_id: 'remote-1',
+            local_mtime: Date.now(),
+            remote_mtime: Date.now(),
+            file_size: 3,
+            md5_hash: 'hash',
+            block_hashes: null,
+            vector_clock: '{}',
+            device_id: 'device-1',
+            etag: null,
+            updated_at: Date.now(),
+            is_tombstone: 0,
+        };
+
+        backend.commitTransfer('pair-1', new Map([[state.rel_path, state]]), [journalId], ['operation-1']);
+
+        expect(backend.getFileState('pair-1', state.rel_path)?.remote_id).toBe('remote-1');
+        expect(backend.getPendingJournalEntries('pair-1')).toHaveLength(0);
+        expect(backend.getRecoverableOperations('pair-1')).toHaveLength(0);
     });
 });
