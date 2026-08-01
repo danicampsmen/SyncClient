@@ -501,6 +501,16 @@ Los vector clocks existentes pueden complementar el hash base, no sustituirlo.
 - Crear fixtures de Drive y filesystem.
 - Crear un servidor HTTP falso para respuestas 200, 308, 403, 404, 429 y 5xx.
 - Separar pruebas Ubuntu de pruebas Android.
+- Preparar la base independiente de rclone: configuración de pareja validada,
+  ruta externa de configuración privada, lock por pareja y ejecución segura
+  mediante `spawn` sin shell. Las operaciones destructivas requieren `--dry-run`
+  o confirmación explícita; no se comparte estado con SQLite ni con el motor
+  nativo.
+- Adoptar `package-lock.json` como lockfile oficial de npm y conservarlo
+  versionado para que las pruebas reproduzcan las mismas dependencias.
+- La recuperación de locks abandonados queda deliberadamente pendiente: nunca
+  se eliminará un lock activo por antigüedad sin comprobar el PID y exigir una
+  acción explícita.
 
 ## Fase 1 - Persistencia
 

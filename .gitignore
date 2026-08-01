@@ -39,8 +39,7 @@ electron/out/
 *.blockmap
 latest-*.yml
 
-# Lockfiles generados (mantener solo el que se adopte como oficial)
-package-lock.json
+# Lockfiles generados (npm es el gestor oficial de este proyecto)
 bun.lock
 yarn.lock
 pnpm-lock.yaml
