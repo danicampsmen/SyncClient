@@ -15,6 +15,61 @@ Objetivos:
 - Verificar integridad antes de confirmar una transferencia.
 - Reducir el consumo de la API evitando recorridos completos repetidos.
 
+## Mejoras utiles extraidas de auditorias anteriores
+
+Estas recomendaciones se conservan como trabajo verificable. No se considera
+que una auditoria haya demostrado una correccion hasta que exista una prueba o
+una verificacion reproducible en este repositorio.
+
+### Seguridad del cliente Ubuntu
+
+- Guardar access tokens y refresh tokens en el llavero del sistema Linux
+  (`safeStorage`, Secret Service o una alternativa equivalente), nunca en
+  `localStorage`.
+- Proteger el servidor Express local con un secreto de sesion generado al
+  arrancar Electron, validacion de `Authorization` y CORS restringido.
+- Revisar `contextIsolation`, `nodeIntegration` y `sandbox` de Electron, y
+  exponer en preload solo operaciones necesarias.
+- No guardar secretos OAuth en archivos versionados; usar variables de entorno
+  o almacenamiento seguro y rotar cualquier secreto expuesto.
+
+### Integridad y seguridad de archivos
+
+- Validar MD5 de Drive cuando exista y conservar SHA-256 local cuando no exista.
+- No deduplicar solo por nombre: comparar hash, tamano, ruta y estado base antes
+  de borrar o renombrar.
+- Excluir `.syncmeta`, temporales, locks y archivos del motor del escaneo remoto.
+- Resolver symlinks y validar la ruta real contra las bases permitidas antes de
+  leer, escribir o borrar.
+- Detectar colisiones de mayusculas/minusculas entre Drive y ext4 y convertirlas
+  en advertencias o conflictos, no en sobrescrituras silenciosas.
+
+### Robustez del motor
+
+- Mantener la ejecucion secuencial por pareja; paralelizar solo transferencias
+  independientes con un limite de 2-3 workers.
+- Manejar 401 renovando el token y reintentando una vez de forma segura.
+- Manejar HTTP 308 y consultar el rango confirmado antes de reintentar uploads.
+- Verificar que las respuestas resumables incluyan `Location`; fallar de forma
+  explicita si la sesion no puede continuar.
+- No conservar llamadas SQLite sin efecto, como consultas sin `pair_id`; pasar
+  el contexto correcto o eliminarlas.
+- Asegurar que el debounce de persistencia guarde el ultimo estado, no una
+  fotografia antigua.
+- No usar `catch` vacios en reconciliacion: registrar el error y conservar la
+  operacion para recuperacion.
+
+### Calidad y pruebas
+
+- Ejecutar pruebas unitarias de `CoreSyncLogic`, conflictos, deduplicacion,
+  hashes, rutas y vector clocks.
+- Añadir pruebas de integracion con SQLite real y un servidor Drive simulado.
+- Probar reinicio, apagado durante transferencia, checksum incorrecto, 401,
+  308, 429, 5xx, cursor invalido y eventos duplicados.
+- Mantener un solo gestor de paquetes y un lockfile oficial.
+- Verificar las afirmaciones de auditorias contra el codigo y los logs actuales;
+  no heredar resultados historicos como evidencia presente.
+
 ## Nota de confiabilidad
 
 No existe una implementación que pueda garantizar matemáticamente 100% de
