@@ -82,6 +82,39 @@ protecciones contra borrados, locks, snapshots, recuperacion y verificaciones.
 El motor propio se implementara con las mismas invariantes, pero mantendra el
 control de conflictos y la integracion nativa con SyncClient.
 
+## Directiva de modularidad y continuidad operativa
+
+Ubuntu debe ofrecer dos módulos completos y desacoplados:
+
+1. **Módulo rclone**: modo operativo independiente, ejecutable por CLI aunque
+   SyncClient, Express, SQLite o el motor propio estén detenidos.
+2. **Módulo nativo**: motor Drive API + SQLite integrado con la UI, el watcher,
+   los conflictos y los manifiestos propios de SyncClient.
+
+El módulo rclone no puede depender de tablas SQLite, cursores, journal, tokens
+ni procesos del motor nativo. Debe mantener su propia configuración segura,
+locks, snapshots, logs, recuperación y verificación. El módulo nativo tampoco
+debe asumir que rclone está instalado o disponible.
+
+La selección de módulo debe ser explícita por pareja y persistir solo como
+configuración de control, nunca como estado compartido de sincronización. La UI
+debe bloquear la ejecución simultánea de ambos módulos sobre la misma pareja.
+No se permite cambiar de módulo durante una operación ni hacer fallback
+silencioso después de un error parcial: se debe detener, conservar el estado,
+mostrar el error y pedir una acción explícita.
+
+Cada módulo debe poder validarse sin el otro:
+
+- rclone: `--dry-run`, ejecución real controlada, `--check-sync`, `rclone check`,
+  recuperación y pruebas de reinicio desde CLI.
+- Motor nativo: pruebas de SQLite, cursores, journal, watcher y transferencias
+  sin requerir rclone.
+
+La interfaz común solo debe compartir conceptos de configuración (pareja,
+dirección, exclusiones y estado visible), no archivos de estado ni mecanismos
+internos. Las pruebas de aceptación deben ejecutar ambos módulos por separado
+contra una carpeta de prueba y nunca contra datos reales del usuario.
+
 # 1. Opcion operativa de máxima confianza: rclone bisync
 
 `rclone bisync` es la alternativa mantenida y con mayor evidencia practica para
@@ -157,15 +190,19 @@ Estas caracteristicas son evidencia de madurez, no una garantia absoluta:
 
 ## Integracion recomendada con SyncClient
 
-No incrustar rclone como sustituto silencioso del motor propio. Ofrecerlo como:
+No incrustar rclone como sustituto silencioso del motor propio. Ofrecerlo como
+un adaptador modular de primera clase:
 
-1. Modo de recuperacion.
-2. Modo de reconciliacion inicial.
-3. Herramienta de diagnostico.
-4. Modo alternativo seleccionable para usuarios que prioricen madurez
+1. Modo operativo independiente completo.
+2. Modo de recuperacion.
+3. Modo de reconciliacion inicial.
+4. Herramienta de diagnostico.
+5. Modo alternativo seleccionable para usuarios que prioricen madurez
    operativa sobre conflictos personalizados.
 
-La UI debe impedir que ambos motores trabajen sobre la misma pareja simultaneamente.
+La UI debe impedir que ambos motores trabajen sobre la misma pareja
+simultaneamente y debe permitir ejecutar el módulo rclone sin que el motor
+nativo esté disponible.
 
 ## Otros modos de sincronizacion de rclone
 
@@ -595,6 +632,10 @@ La implementacion Ubuntu no se considerara lista hasta demostrar:
 9. Las pruebas de fallos y de escala producen logs auditables.
 10. El modo rclone y el motor propio no pueden ejecutarse simultaneamente sobre
     la misma pareja.
+11. El módulo rclone completa una inicialización, un ciclo normal, una
+    recuperación y una verificación sin que el motor propio ni SQLite estén
+    ejecutándose.
+12. El motor nativo puede probarse y recuperarse sin que rclone esté instalado.
 
 # 6. Fuentes oficiales principales
 

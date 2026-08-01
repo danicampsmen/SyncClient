@@ -100,6 +100,22 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 - Para operaciones no soportadas en Android, delegar al PC vía HTTP (patrón relay).
 - Probar cambios en las 3 plataformas: Linux Desktop, Android Tablet, Android Celular.
 
+### R14: Modularidad y modo rclone independiente
+- Separar el adaptador operativo de `rclone` del motor propio basado en Drive API
+  + SQLite. Ninguno puede ser una dependencia de ejecución del otro.
+- `rclone` debe funcionar de extremo a extremo aunque el motor propio, SQLite,
+  el servidor Express o la interfaz de SyncClient estén detenidos.
+- El módulo rclone debe tener configuración, locks, estado, logs, recuperación y
+  validaciones propias; no reutilizar silenciosamente el journal ni los cursores
+  del motor propio.
+- La aplicación debe impedir dos motores sobre la misma pareja y mostrar cuál
+  está activo. Nunca cambiar automáticamente de motor a mitad de una operación.
+- Todo fallback a rclone debe ser explícito, auditable y precedido por `--dry-run`
+  cuando la operación pueda borrar o renombrar archivos.
+- Probar rclone como producto independiente mediante CLI, incluyendo inicialización,
+  ciclos normales, reinicio, red intermitente, conflictos, recuperación y
+  verificación con `rclone check`.
+
 ---
 
 ## Estructura de Archivos Clave
@@ -113,6 +129,7 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 | `server.ts` | Servidor Express + API REST |
 | `src/auth.ts` | Firebase Auth + Google OAuth |
 | `src/drive.ts` | Cliente Google Drive API (web) |
+| `docs/PLAN_BISINCRONIZACION_UBUNTU.md` | Contrato de los motores Ubuntu y rclone |
 
 ## Glosario
 

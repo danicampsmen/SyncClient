@@ -70,6 +70,12 @@ secrets/
 data/
 userdata/
 
+# Configuracion y estado local de rclone (pueden contener credenciales)
+.rclone/
+rclone.conf
+*.rclone.conf
+*.bisync
+
 # Cachés, logs y archivos temporales
 *.log
 logs/

@@ -149,6 +149,10 @@ SyncClient detecta automáticamente archivos numerados como `Nota(1).pdf`, `Nota
 - `VFSBridge.readFile/writeFile` en modo desktop requiere verificación de endpoints.
 - La bisincronización incremental de Ubuntu con `changes.list` y cursores SQLite
   está planificada, pero aún no se declara terminada.
+- Ubuntu tendrá dos módulos independientes: rclone como modo operativo autónomo
+  y el motor propio Drive API + SQLite. rclone debe funcionar aunque SyncClient
+  o el motor propio estén detenidos; no habrá fallback silencioso ni estados
+  compartidos.
 
 Para el plan técnico de Ubuntu, consulta
 [`docs/PLAN_BISINCRONIZACION_UBUNTU.md`](docs/PLAN_BISINCRONIZACION_UBUNTU.md).

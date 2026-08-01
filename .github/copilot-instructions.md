@@ -91,6 +91,20 @@ necesario para la tarea.
 - No enviar contenido a servicios externos ni instalar dependencias sin que la
   tarea lo requiera y el usuario lo autorice.
 
+## Modularidad del motor Ubuntu
+
+- Diseñar Ubuntu con dos módulos independientes: `rclone` como modo operativo
+  completo y el motor propio Drive API + SQLite como modo nativo.
+- El modo rclone debe seguir funcionando aunque el motor propio, SQLite, Express
+  o la UI estén caídos; no depender de sus tablas, cursores ni journal.
+- Mantener configuración, locks, snapshots, logs, recuperación y validación de
+  rclone separados. No implementar un fallback silencioso ni mezclar estados.
+- Evitar que ambos motores ejecuten la misma pareja al mismo tiempo. El cambio de
+  modo debe ser explícito, bloqueado y seguro, con `--dry-run` antes de acciones
+  destructivas.
+- Toda mejora del motor propio debe conservar el contrato del adaptador rclone y
+  probar ambos caminos de forma independiente.
+
 ## Respuestas y cambios
 
 - Explicar brevemente qué archivos se revisaron y por qué.
