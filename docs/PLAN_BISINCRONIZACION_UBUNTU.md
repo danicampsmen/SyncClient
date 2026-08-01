@@ -540,6 +540,21 @@ Estado actual de la fase:
 - Implementar rescan ante cursor invalido.
 - Mantener reconciliacion completa diaria o bajo demanda.
 
+Estado actual de la fase:
+
+- Implementado [`src/backend/driveChanges.ts`](../src/backend/driveChanges.ts)
+  como ingestor reutilizable y desacoplado del motor de transferencias.
+- Usa `getStartPageToken` cuando no existe cursor y `changes.list` para las
+  paginas siguientes.
+- Solo persiste `newStartPageToken` despues de aplicar todas las paginas.
+- Conserva el cursor anterior si falla `applyChange`.
+- Los cursores invalidos o expirados generan una señal de rescan controlado sin
+  borrar el estado local.
+- Incluye parametros para unidades compartidas y reintentos acotados de 429,
+  5xx y errores de red.
+- La integracion con `syncEngine.ts` y la aplicacion de cambios sobre archivos
+  se dejan para la siguiente fase, junto con las transferencias.
+
 ## Fase 3 - Transferencias
 
 - Reemplazar la subida Desktop de una sola transmision por chunks.
