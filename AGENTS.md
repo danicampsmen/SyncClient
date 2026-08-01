@@ -116,6 +116,21 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
   ciclos normales, reinicio, red intermitente, conflictos, recuperación y
   verificación con `rclone check`.
 
+### R15: Uso eficiente de modelos
+- Usar preferentemente el modelo local `qwen2.5-coder:7b` mediante Ollama para
+  documentación, tests, fixtures, refactorizaciones mecánicas, scripts, tipos y
+  resúmenes de errores.
+- Reservar Copilot para Drive API, OAuth, Firebase, SQLite crítico, cursores,
+  conflictos, integridad, seguridad, relay y revisiones finales.
+- El modelo local no recibe secretos, tokens, bases de datos, datos reales,
+  archivos sincronizados ni contenido privado de Google Drive.
+- El modelo local no instala dependencias ni ejecuta comandos destructivos sin
+  autorización explícita. Todo cambio debe revisarse con diff y pruebas.
+- Si una tarea rutinaria toca una invariante de sincronización o puede producir
+  pérdida de datos, deja de ser rutinaria y requiere revisión de Copilot.
+- La selección de modelo debe hacerse explícitamente en la herramienta local;
+  estas directivas no garantizan el cambio automático de proveedor en VS Code.
+
 ---
 
 ## Estructura de Archivos Clave

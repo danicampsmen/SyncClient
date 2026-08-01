@@ -105,6 +105,54 @@ necesario para la tarea.
 - Toda mejora del motor propio debe conservar el contrato del adaptador rclone y
   probar ambos caminos de forma independiente.
 
+## Enrutamiento entre Copilot y modelo local
+
+El modelo local preferido para tareas rutinarias es
+`qwen2.5-coder:7b` mediante Ollama en `http://127.0.0.1:11434`. Estas directivas
+no cambian automáticamente el modelo seleccionado por VS Code; indican qué
+trabajos deben mantenerse fuera de Copilot cuando el usuario los ejecute con la
+herramienta local.
+
+### Usar primero el modelo local
+
+- Explicar funciones o archivos pequeños.
+- Crear y ajustar tests unitarios, mocks y fixtures.
+- Hacer refactorizaciones mecánicas y cambios de nombres.
+- Generar documentación, comentarios y tipos.
+- Preparar scripts de shell, npm y rclone.
+- Resumir errores de compilación, lint o pruebas.
+- Explorar referencias sin modificar código crítico.
+- Proponer diffs pequeños que después serán revisados.
+
+### Reservar Copilot para tareas críticas
+
+- Diseño o modificación del motor Drive API + SQLite.
+- Cursores `changes.list`, outbox, migraciones y recuperación de SQLite.
+- Conflictos, borrados, integridad y transferencias resumables.
+- OAuth, Firebase, tokens, permisos, relay y seguridad.
+- Cambios compartidos entre Ubuntu y Android.
+- Revisión final de cambios que puedan causar pérdida de datos.
+
+### Reglas para el modelo local
+
+- Enviar solo archivos y símbolos estrictamente necesarios.
+- Mantener el contexto local entre 4K y 8K tokens.
+- No enviar credenciales, tokens, datos reales, bases de datos ni contenido de
+  Google Drive, aunque el modelo se ejecute en `localhost`.
+- No permitir que el modelo local instale dependencias, ejecute comandos
+  destructivos o modifique archivos fuera del alcance.
+- Revisar con tests y, para cambios críticos, con Copilot antes de aceptar.
+- Si una tarea local revela riesgos de seguridad, sincronización o pérdida de
+  datos, detenerla y transferirla a Copilot.
+
+### Flujo recomendado
+
+1. Preparar el cambio mecánico con `qwen2.5-coder:7b`.
+2. Revisar manualmente el diff.
+3. Ejecutar el test focalizado y lint.
+4. Usar Copilot solo para la parte crítica o la revisión final.
+5. No enviar a Copilot el historial completo de la conversación local.
+
 ## Respuestas y cambios
 
 - Explicar brevemente qué archivos se revisaron y por qué.
