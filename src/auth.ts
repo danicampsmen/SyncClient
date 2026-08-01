@@ -36,6 +36,10 @@ let cachedRefreshToken: string | null = null;
 const TOKEN_REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // Renovar si faltan menos de 5 minutos
 
 const GOOGLE_CLIENT_ID = (firebaseConfig as any).oAuthClientId as string;
+const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET
+  || import.meta.env.VITE_FIREBASE_CLIENT_SECRET
+  || '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';
+
 let isElectronOAuthInProgress = false;
 
 // --- Funciones de Almacenamiento Seguro (Asíncronas) ---
@@ -117,6 +121,7 @@ async function exchangeCodeForTokens(code: string, verifier: string, redirectUri
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
         code,
         code_verifier: verifier,
         redirect_uri: redirectUri,
@@ -154,6 +159,7 @@ export const refreshAccessToken = async (): Promise<string | null> => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
           refresh_token: cachedRefreshToken,
           grant_type: 'refresh_token',
         }).toString(),

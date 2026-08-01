@@ -30,7 +30,7 @@
     "capacitor-secure-storage-plugin": "^0.13.0",
     "chokidar": "^5.0.0",
     "express": "^4.21.2",
-    "firebase": "^12.16.0",
+    "firebase": "^12.17.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",

@@ -9,13 +9,13 @@ export interface FirebaseClientConfig {
 }
 
 const PLACEHOLDER_CONFIG: FirebaseClientConfig = {
-  apiKey: 'REPLACE_WITH_REAL_API_KEY',
-  authDomain: 'REPLACE_WITH_REAL_AUTH_DOMAIN',
-  projectId: 'REPLACE_WITH_REAL_PROJECT_ID',
-  storageBucket: 'REPLACE_WITH_REAL_STORAGE_BUCKET',
-  messagingSenderId: '000000000000',
-  appId: 'REPLACE_WITH_REAL_APP_ID',
-  oAuthClientId: 'REPLACE_WITH_REAL_OAUTH_CLIENT_ID',
+  apiKey: 'AIzaSyAobuWG8WiWU4kFHwDCmwoyHb9Hx9NGvPQ',
+  authDomain: 'gen-lang-client-0459053075.firebaseapp.com',
+  projectId: 'gen-lang-client-0459053075',
+  storageBucket: 'gen-lang-client-0459053075.firebasestorage.app',
+  messagingSenderId: '123619653091',
+  appId: '1:123619653091:web:88153bec247c74379e1cd6',
+  oAuthClientId: '123619653091-7htd1ubnbdoi3vchlo99mcv2mq6gmkmq.apps.googleusercontent.com',
 };
 
 function readEnv(name: string): string | undefined {
@@ -27,23 +27,22 @@ function readEnv(name: string): string | undefined {
 }
 
 export function getFirebaseClientConfig(): FirebaseClientConfig {
-  const envConfig = {
-    apiKey: readEnv('VITE_FIREBASE_API_KEY'),
-    authDomain: readEnv('VITE_FIREBASE_AUTH_DOMAIN'),
-    projectId: readEnv('VITE_FIREBASE_PROJECT_ID'),
-    storageBucket: readEnv('VITE_FIREBASE_STORAGE_BUCKET'),
-    messagingSenderId: readEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
-    appId: readEnv('VITE_FIREBASE_APP_ID'),
-    oAuthClientId: readEnv('VITE_FIREBASE_OAUTH_CLIENT_ID'),
+  const config: FirebaseClientConfig = {
+    apiKey: readEnv('VITE_FIREBASE_API_KEY') || PLACEHOLDER_CONFIG.apiKey,
+    authDomain: readEnv('VITE_FIREBASE_AUTH_DOMAIN') || PLACEHOLDER_CONFIG.authDomain,
+    projectId: readEnv('VITE_FIREBASE_PROJECT_ID') || PLACEHOLDER_CONFIG.projectId,
+    storageBucket: readEnv('VITE_FIREBASE_STORAGE_BUCKET') || PLACEHOLDER_CONFIG.storageBucket,
+    messagingSenderId: readEnv('VITE_FIREBASE_MESSAGING_SENDER_ID') || PLACEHOLDER_CONFIG.messagingSenderId,
+    appId: readEnv('VITE_FIREBASE_APP_ID') || PLACEHOLDER_CONFIG.appId,
+    oAuthClientId: readEnv('VITE_FIREBASE_OAUTH_CLIENT_ID') || readEnv('VITE_GOOGLE_CLIENT_ID') || PLACEHOLDER_CONFIG.oAuthClientId,
   };
 
-  const config = { ...PLACEHOLDER_CONFIG, ...envConfig };
   const hasRealValues = Boolean(
-    config.apiKey && config.apiKey !== PLACEHOLDER_CONFIG.apiKey
-    && config.authDomain && config.authDomain !== PLACEHOLDER_CONFIG.authDomain
-    && config.projectId && config.projectId !== PLACEHOLDER_CONFIG.projectId
-    && config.appId && config.appId !== PLACEHOLDER_CONFIG.appId
-    && config.oAuthClientId && config.oAuthClientId !== PLACEHOLDER_CONFIG.oAuthClientId,
+    config.apiKey && !config.apiKey.includes('REPLACE_WITH')
+    && config.authDomain && !config.authDomain.includes('REPLACE_WITH')
+    && config.projectId && !config.projectId.includes('REPLACE_WITH')
+    && config.appId && !config.appId.includes('REPLACE_WITH')
+    && config.oAuthClientId && !config.oAuthClientId.includes('REPLACE_WITH'),
   );
 
   if (!hasRealValues) {

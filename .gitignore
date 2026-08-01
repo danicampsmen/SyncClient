@@ -106,3 +106,5 @@ test-results/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+client_secret_*.json
+*.json.json
