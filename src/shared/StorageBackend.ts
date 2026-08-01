@@ -6,7 +6,18 @@
  * Fallback: JSONBackend (sync_data.json)
  */
 
-import { CREATE_TABLE_SQL, FileState, SyncJournalEntry, DeviceInfo } from './schema';
+import {
+    CREATE_TABLE_SQL,
+    DeviceInfo,
+    DriveCursor,
+    FileState,
+    MIGRATION_SQL,
+    SCHEMA_VERSION,
+    SyncConflict,
+    SyncJournalEntry,
+    SyncOperation,
+    UploadSession,
+} from './schema';
 
 // ─── IStorageBackend ────────────────────────────────────────────
 
@@ -31,9 +42,72 @@ export interface IStorageBackend {
     journalFail(journalId: number): void;
     getPendingJournalEntries(pairId: string): SyncJournalEntry[];
 
+    getDriveCursor(key: Pick<DriveCursor, 'pair_id' | 'account_id' | 'corpus_id' | 'drive_id'>): DriveCursor | null;
+    setDriveCursor(cursor: DriveCursor): void;
+    createOperation(operation: SyncOperation): void;
+    updateOperation(id: string, patch: Partial<Pick<SyncOperation, 'status' | 'attempts' | 'last_error' | 'updated_at'>>): void;
+    getRecoverableOperations(pairId?: string): SyncOperation[];
+    setUploadSession(session: UploadSession): void;
+    getUploadSession(operationId: string): UploadSession | null;
+    deleteUploadSession(operationId: string): void;
+    setConflict(conflict: SyncConflict): void;
+    getPendingConflicts(pairId: string): SyncConflict[];
+
     // Mantenimiento
     vacuum(): void;
     checkpoint(): Promise<void>;
+}
+
+function rowToDriveCursor(row: any): DriveCursor {
+    return { ...row, last_success_at: row.last_success_at ?? null };
+}
+
+function rowToSyncOperation(row: any): SyncOperation {
+    return { ...row, remote_id: row.remote_id ?? null, last_error: row.last_error ?? null };
+}
+
+function rowToUploadSession(row: any): UploadSession {
+    return { ...row, remote_id: row.remote_id ?? null };
+}
+
+function rowToSyncConflict(row: any): SyncConflict {
+    return { ...row, local_hash: row.local_hash ?? null, remote_hash: row.remote_hash ?? null, base_hash: row.base_hash ?? null };
+}
+
+function applyMigrations(db: any, wasm: boolean): void {
+    const currentRow = wasm
+        ? (() => {
+            const stmt = db.prepare("SELECT value FROM schema_metadata WHERE key = 'version'");
+            stmt.bind([]);
+            const row = stmt.step() ? stmt.get()[0] : null;
+            stmt.free();
+            return row;
+        })()
+        : db.prepare("SELECT value FROM schema_metadata WHERE key = 'version'").get()?.value;
+    let current = Number(currentRow || 1);
+    if (!currentRow) {
+        if (wasm) db.run("INSERT INTO schema_metadata (key, value) VALUES ('version', '1')");
+        else db.prepare("INSERT INTO schema_metadata (key, value) VALUES ('version', '1')").run();
+    }
+    for (const migration of MIGRATION_SQL) {
+        if (migration.version <= current) continue;
+        if (wasm) {
+            db.run('BEGIN');
+            try {
+                db.run(migration.sql);
+                db.run('COMMIT');
+            } catch (error) {
+                db.run('ROLLBACK');
+                throw error;
+            }
+        } else {
+            db.transaction(() => db.exec(migration.sql))();
+        }
+        current = migration.version;
+    }
+    if (current !== SCHEMA_VERSION) {
+        throw new Error(`Unsupported SQLite schema version ${current}`);
+    }
 }
 
 // ─── Detección de plataforma ────────────────────────────────────
@@ -155,6 +229,9 @@ export class SQLiteBackend implements IStorageBackend {
 
         // Crear tablas (idempotente)
         this.db.exec(CREATE_TABLE_SQL);
+        applyMigrations(this.db, false);
+        this.db.prepare("UPDATE sync_operations SET status = 'retry', updated_at = ? WHERE status = 'running'")
+            .run(Date.now());
 
         // Inicializar journal ID desde el máximo existente
         const maxId = this.db.prepare('SELECT MAX(id) as mx FROM sync_journal').get()?.mx;
@@ -181,6 +258,8 @@ export class SQLiteBackend implements IStorageBackend {
 
         // Crear tablas (idempotente)
         this.db.run(CREATE_TABLE_SQL);
+        applyMigrations(this.db, true);
+        this.db.run("UPDATE sync_operations SET status = 'retry', updated_at = ? WHERE status = 'running'", [Date.now()]);
 
         const maxId = this.db.exec('SELECT MAX(id) as mx FROM sync_journal');
         this.nextJournalId = ((maxId?.[0]?.values?.[0]?.[0] as number) || 0) + 1;
@@ -361,6 +440,92 @@ export class SQLiteBackend implements IStorageBackend {
         return rows;
     }
 
+    getDriveCursor(key: Pick<DriveCursor, 'pair_id' | 'account_id' | 'corpus_id' | 'drive_id'>): DriveCursor | null {
+        const sql = 'SELECT * FROM drive_cursors WHERE pair_id = ? AND account_id = ? AND corpus_id = ? AND drive_id = ?';
+        const params = [key.pair_id, key.account_id, key.corpus_id, key.drive_id];
+        const row = isCapacitor() ? this._wasmGet(this.db.prepare(sql), params) : this.db.prepare(sql).get(...params);
+        return row ? rowToDriveCursor(row) : null;
+    }
+
+    setDriveCursor(cursor: DriveCursor): void {
+        const sql = `INSERT OR REPLACE INTO drive_cursors
+            (pair_id, account_id, corpus_id, drive_id, page_token, last_success_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`;
+        const params = [cursor.pair_id, cursor.account_id, cursor.corpus_id, cursor.drive_id,
+            cursor.page_token, cursor.last_success_at, cursor.status];
+        if (isCapacitor()) this.db.run(sql, params);
+        else this.db.prepare(sql).run(...params);
+    }
+
+    createOperation(operation: SyncOperation): void {
+        const sql = `INSERT INTO sync_operations
+            (id, pair_id, rel_path, operation_type, remote_id, status, attempts, last_error, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        const params = [operation.id, operation.pair_id, operation.rel_path, operation.operation_type,
+            operation.remote_id, operation.status, operation.attempts, operation.last_error,
+            operation.created_at, operation.updated_at];
+        if (isCapacitor()) this.db.run(sql, params);
+        else this.db.prepare(sql).run(...params);
+    }
+
+    updateOperation(id: string, patch: Partial<Pick<SyncOperation, 'status' | 'attempts' | 'last_error' | 'updated_at'>>): void {
+        const entries = Object.entries({ ...patch, updated_at: patch.updated_at ?? Date.now() });
+        if (entries.length === 0) return;
+        const sql = `UPDATE sync_operations SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`;
+        const params = [...entries.map(([, value]) => value), id];
+        if (isCapacitor()) this.db.run(sql, params);
+        else this.db.prepare(sql).run(...params);
+    }
+
+    getRecoverableOperations(pairId?: string): SyncOperation[] {
+        const sql = pairId
+            ? "SELECT * FROM sync_operations WHERE pair_id = ? AND status IN ('pending', 'running', 'retry') ORDER BY created_at"
+            : "SELECT * FROM sync_operations WHERE status IN ('pending', 'running', 'retry') ORDER BY created_at";
+        const rows = isCapacitor()
+            ? this._wasmAll(this.db.prepare(sql), pairId ? [pairId] : [])
+            : pairId ? this.db.prepare(sql).all(pairId) : this.db.prepare(sql).all();
+        return rows.map(rowToSyncOperation);
+    }
+
+    setUploadSession(session: UploadSession): void {
+        const sql = `INSERT OR REPLACE INTO upload_sessions
+            (operation_id, remote_id, session_uri, file_size, confirmed_offset, chunk_size, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`;
+        const params = [session.operation_id, session.remote_id, session.session_uri, session.file_size,
+            session.confirmed_offset, session.chunk_size, session.updated_at];
+        if (isCapacitor()) this.db.run(sql, params);
+        else this.db.prepare(sql).run(...params);
+    }
+
+    getUploadSession(operationId: string): UploadSession | null {
+        const sql = 'SELECT * FROM upload_sessions WHERE operation_id = ?';
+        const row = isCapacitor() ? this._wasmGet(this.db.prepare(sql), [operationId]) : this.db.prepare(sql).get(operationId);
+        return row ? rowToUploadSession(row) : null;
+    }
+
+    deleteUploadSession(operationId: string): void {
+        if (isCapacitor()) this.db.run('DELETE FROM upload_sessions WHERE operation_id = ?', [operationId]);
+        else this.db.prepare('DELETE FROM upload_sessions WHERE operation_id = ?').run(operationId);
+    }
+
+    setConflict(conflict: SyncConflict): void {
+        const sql = `INSERT OR REPLACE INTO sync_conflicts
+            (id, pair_id, rel_path, local_hash, remote_hash, base_hash, resolution, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+        const params = [conflict.id, conflict.pair_id, conflict.rel_path, conflict.local_hash,
+            conflict.remote_hash, conflict.base_hash, conflict.resolution, conflict.created_at];
+        if (isCapacitor()) this.db.run(sql, params);
+        else this.db.prepare(sql).run(...params);
+    }
+
+    getPendingConflicts(pairId: string): SyncConflict[] {
+        const sql = "SELECT * FROM sync_conflicts WHERE pair_id = ? AND resolution = 'pending' ORDER BY created_at";
+        const rows = isCapacitor()
+            ? this._wasmAll(this.db.prepare(sql), [pairId])
+            : this.db.prepare(sql).all(pairId);
+        return rows.map(rowToSyncConflict);
+    }
+
     // ─── Mantenimiento ────────────────────────────────────────────
 
     vacuum(): void {
@@ -377,8 +542,22 @@ export class SQLiteBackend implements IStorageBackend {
     async checkpoint(): Promise<void> {
         if (isCapacitor()) {
             await this.checkpointWasm();
+        } else {
+            await this.checkpointNative();
         }
-        // Desktop: better-sqlite3 persiste automáticamente en WAL mode
+    }
+
+    private async checkpointNative(): Promise<void> {
+        const backupPath = `${this.dbPath}.backup`;
+        await this.db.backup(backupPath);
+        const Database = this.db.constructor;
+        const backupDb = new Database(backupPath, { readonly: true });
+        try {
+            const result = backupDb.pragma('integrity_check', { simple: true });
+            if (result !== 'ok') throw new Error(`SQLite backup integrity check failed: ${String(result)}`);
+        } finally {
+            backupDb.close();
+        }
     }
 
     private async checkpointWasm(): Promise<void> {
@@ -410,7 +589,7 @@ export class SQLiteBackend implements IStorageBackend {
             // 4. Limpiar backup
             await this.fs.rm(backupPath).catch(() => { });
         } catch (e) {
-            console.error('[SQLiteBackend] Checkpoint failed:', e);
+            throw new Error(`SQLite WASM checkpoint failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
         }
     }
 
@@ -457,6 +636,10 @@ export class JSONBackend implements IStorageBackend {
         fileStates: Record<string, Record<string, FileState>>;
         devices: Record<string, DeviceInfo>;
         journal: SyncJournalEntry[];
+        cursors: Record<string, DriveCursor>;
+        operations: Record<string, SyncOperation>;
+        uploadSessions: Record<string, UploadSession>;
+        conflicts: Record<string, SyncConflict>;
     };
     private configFile: string;
     private fs: any;
@@ -466,7 +649,7 @@ export class JSONBackend implements IStorageBackend {
     constructor(configDir: string, fs?: any) {
         this.configFile = `${configDir}/sync_data.json`;
         this.fs = fs;
-        this.data = { fileStates: {}, devices: {}, journal: [] };
+        this.data = { fileStates: {}, devices: {}, journal: [], cursors: {}, operations: {}, uploadSessions: {}, conflicts: {} };
     }
 
     async init(): Promise<boolean> {
@@ -478,6 +661,10 @@ export class JSONBackend implements IStorageBackend {
                     if (parsed.fileStates) this.data.fileStates = parsed.fileStates;
                     if (parsed.devices) this.data.devices = parsed.devices;
                     if (parsed.journal) this.data.journal = parsed.journal;
+                    if (parsed.cursors) this.data.cursors = parsed.cursors;
+                    if (parsed.operations) this.data.operations = parsed.operations;
+                    if (parsed.uploadSessions) this.data.uploadSessions = parsed.uploadSessions;
+                    if (parsed.conflicts) this.data.conflicts = parsed.conflicts;
                 }
             } else {
                 const fs = await import('fs/promises');
@@ -487,10 +674,21 @@ export class JSONBackend implements IStorageBackend {
                     if (parsed.fileStates) this.data.fileStates = parsed.fileStates;
                     if (parsed.devices) this.data.devices = parsed.devices;
                     if (parsed.journal) this.data.journal = parsed.journal;
+                    if (parsed.cursors) this.data.cursors = parsed.cursors;
+                    if (parsed.operations) this.data.operations = parsed.operations;
+                    if (parsed.uploadSessions) this.data.uploadSessions = parsed.uploadSessions;
+                    if (parsed.conflicts) this.data.conflicts = parsed.conflicts;
                 } catch { /* no file yet */ }
             }
 
             this.nextJournalId = this.data.journal.reduce((max, e) => Math.max(max, e.id), 0) + 1;
+            for (const operation of Object.values(this.data.operations)) {
+                if (operation.status === 'running') {
+                    operation.status = 'retry';
+                    operation.updated_at = Date.now();
+                    this.dirty = true;
+                }
+            }
             return true;
         } catch {
             return true; // Empezar con estado vacío
@@ -571,6 +769,64 @@ export class JSONBackend implements IStorageBackend {
 
     getPendingJournalEntries(pairId: string): SyncJournalEntry[] {
         return this.data.journal.filter(e => e.pair_id === pairId && e.status === 'pending');
+    }
+
+    private cursorKey(key: Pick<DriveCursor, 'pair_id' | 'account_id' | 'corpus_id' | 'drive_id'>): string {
+        return [key.pair_id, key.account_id, key.corpus_id, key.drive_id].join('\u0000');
+    }
+
+    getDriveCursor(key: Pick<DriveCursor, 'pair_id' | 'account_id' | 'corpus_id' | 'drive_id'>): DriveCursor | null {
+        return this.data.cursors[this.cursorKey(key)] || null;
+    }
+
+    setDriveCursor(cursor: DriveCursor): void {
+        this.data.cursors[this.cursorKey(cursor)] = cursor;
+        this.dirty = true;
+    }
+
+    createOperation(operation: SyncOperation): void {
+        if (this.data.operations[operation.id]) throw new Error(`Operation already exists: ${operation.id}`);
+        this.data.operations[operation.id] = operation;
+        this.dirty = true;
+    }
+
+    updateOperation(id: string, patch: Partial<Pick<SyncOperation, 'status' | 'attempts' | 'last_error' | 'updated_at'>>): void {
+        const operation = this.data.operations[id];
+        if (!operation) throw new Error(`Operation not found: ${id}`);
+        this.data.operations[id] = { ...operation, ...patch, updated_at: patch.updated_at ?? Date.now() };
+        this.dirty = true;
+    }
+
+    getRecoverableOperations(pairId?: string): SyncOperation[] {
+        return Object.values(this.data.operations)
+            .filter(operation => (!pairId || operation.pair_id === pairId)
+                && ['pending', 'running', 'retry'].includes(operation.status))
+            .sort((a, b) => a.created_at - b.created_at);
+    }
+
+    setUploadSession(session: UploadSession): void {
+        this.data.uploadSessions[session.operation_id] = session;
+        this.dirty = true;
+    }
+
+    getUploadSession(operationId: string): UploadSession | null {
+        return this.data.uploadSessions[operationId] || null;
+    }
+
+    deleteUploadSession(operationId: string): void {
+        delete this.data.uploadSessions[operationId];
+        this.dirty = true;
+    }
+
+    setConflict(conflict: SyncConflict): void {
+        this.data.conflicts[conflict.id] = conflict;
+        this.dirty = true;
+    }
+
+    getPendingConflicts(pairId: string): SyncConflict[] {
+        return Object.values(this.data.conflicts)
+            .filter(conflict => conflict.pair_id === pairId && conflict.resolution === 'pending')
+            .sort((a, b) => a.created_at - b.created_at);
     }
 
     vacuum(): void {

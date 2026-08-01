@@ -520,6 +520,17 @@ Los vector clocks existentes pueden complementar el hash base, no sustituirlo.
 - Crear backup verificable de SQLite.
 - Quitar `vacuum()` de cada sincronizacion y programar mantenimiento.
 
+Estado actual de la fase:
+
+- Implementadas las migraciones versionadas para cursores, operaciones,
+  sesiones resumables, conflictos y versiones de archivos.
+- `SQLiteBackend` y `JSONBackend` exponen el contrato de persistencia ampliado.
+- Las operaciones `running` se recuperan como `retry` al reiniciar.
+- Desktop crea un backup mediante la API de backup de SQLite y verifica
+  `integrity_check`; WASM mantiene checkpoint temporal, backup y verificacion.
+- La cola todavía no ejecuta transferencias ni confirma cursores: eso pertenece a
+  las fases de `changes.list` y transferencias.
+
 ## Fase 2 - Changes API
 
 - Persistir el start page token.
