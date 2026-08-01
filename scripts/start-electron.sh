@@ -19,7 +19,8 @@ trap cleanup EXIT INT TERM
 
 for _ in $(seq 1 30); do
   if curl --silent --fail --max-time 2 http://127.0.0.1:3000/api/session/bootstrap >/dev/null; then
-    exec electron . --no-sandbox
+    electron . --no-sandbox
+    exit $?
   fi
   sleep 0.5
 done

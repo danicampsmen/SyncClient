@@ -16,12 +16,17 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    def releaseStoreFile = System.getenv('SYNCCLIENT_KEYSTORE_FILE') ?: 'syncclient-release-key.keystore'
+    def releaseStorePassword = System.getenv('SYNCCLIENT_KEYSTORE_PASSWORD')
+    def releaseKeyAlias = System.getenv('SYNCCLIENT_KEY_ALIAS') ?: 'syncclient'
+    def releaseKeyPassword = System.getenv('SYNCCLIENT_KEY_PASSWORD')
+
     signingConfigs {
         release {
-            storeFile file('syncclient-release-key.keystore')
-            storePassword 'android'
-            keyAlias 'syncclient'
-            keyPassword 'android'
+            storeFile file(releaseStoreFile)
+            storePassword releaseStorePassword
+            keyAlias releaseKeyAlias
+            keyPassword releaseKeyPassword
         }
     }
     buildTypes {

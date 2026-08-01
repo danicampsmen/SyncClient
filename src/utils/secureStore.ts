@@ -4,7 +4,7 @@ import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
 const electronBridge = typeof window !== 'undefined' ? (window as Window & {
   electronBridge?: {
     isElectron?: boolean;
-    secureSet?: (key: string, value: string) => Promise<void>;
+    secureSet?: (key: string, value: string) => Promise<boolean>;
     secureGet?: (key: string) => Promise<string | null>;
     secureRemove?: (key: string) => Promise<void>;
   };
@@ -18,7 +18,8 @@ export const SecureStore = {
         }
 
         if (electronBridge?.isElectron && electronBridge.secureSet) {
-            await electronBridge.secureSet(key, value);
+            const stored = await electronBridge.secureSet(key, value);
+            if (!stored) throw new Error('No se pudo guardar el token en el almacenamiento cifrado del sistema');
             return;
         }
 

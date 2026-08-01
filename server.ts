@@ -89,6 +89,36 @@ function isValidArray(val: any): val is any[] {
   return Array.isArray(val);
 }
 
+function isValidSyncPair(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const pair = value as Record<string, unknown>;
+  const localPath = typeof pair.localPath === 'string' && pair.localPath.startsWith('~/')
+    ? path.join(os.homedir(), pair.localPath.slice(2))
+    : pair.localPath;
+  return isValidString(pair.id, 256) &&
+    isValidString(localPath, 4096) && isPathAllowed(localPath) &&
+    isValidString(pair.remotePath, 2048) &&
+    ['bidirectional', 'upload', 'download'].includes(pair.direction as string) &&
+    ['idle', 'syncing', 'error', 'paused', 'unauthenticated'].includes(pair.status as string) &&
+    (pair.lastSynced === null || (typeof pair.lastSynced === 'number' && Number.isFinite(pair.lastSynced))) &&
+    (pair.accountId === undefined || isValidString(pair.accountId, 256)) &&
+    (pair.driveId === undefined || isValidString(pair.driveId, 256)) &&
+    (pair.syncMode === undefined || ['mirror', 'streaming'].includes(pair.syncMode as string)) &&
+    (pair.cloudCategory === undefined || ['computers', 'shared'].includes(pair.cloudCategory as string));
+}
+
+function isValidSyncSettings(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const settings = value as Record<string, unknown>;
+  const validSpeed = (speed: unknown) => typeof speed === 'number' && Number.isFinite(speed) && speed >= 0 && speed <= 1_000_000_000;
+  return validSpeed(settings.maxDownloadSpeed) && validSpeed(settings.maxUploadSpeed) &&
+    ['prompt', 'local', 'remote', 'rename'].includes(settings.conflictResolution as string) &&
+    isValidArray(settings.ignoredPatterns) && settings.ignoredPatterns.length <= 100 &&
+    settings.ignoredPatterns.every(pattern => isValidString(pattern, 256)) &&
+    (settings.autoStart === undefined || typeof settings.autoStart === 'boolean') &&
+    (settings.desktopNotifications === undefined || typeof settings.desktopNotifications === 'boolean');
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -341,6 +371,9 @@ async function startServer() {
     if (token !== null && !isValidString(token, 8192)) {
       return res.status(400).json({ error: "token inválido" });
     }
+    if (refreshToken !== undefined && refreshToken !== null && !isValidString(refreshToken, 8192)) {
+      return res.status(400).json({ error: "refresh token inválido" });
+    }
     syncEngine.setToken(token as string | null, (refreshToken || undefined) as string | undefined);
     res.json({ success: true });
   });
@@ -348,7 +381,7 @@ async function startServer() {
   app.post("/api/sync/pairs", async (req, res) => {
     try {
       const { pairs } = req.body;
-      if (!isValidArray(pairs)) {
+      if (!isValidArray(pairs) || pairs.length > 100 || !pairs.every(isValidSyncPair)) {
         return res.status(400).json({ error: "pairs debe ser un array" });
       }
       await syncEngine.setPairs(pairs);
@@ -361,6 +394,9 @@ async function startServer() {
   app.post("/api/sync/settings", async (req, res) => {
     try {
       const { settings } = req.body;
+      if (!isValidSyncSettings(settings)) {
+        return res.status(400).json({ error: "settings inválidos" });
+      }
       await syncEngine.updateSettings(settings);
       res.json({ success: true, status: syncEngine.getStatus() });
     } catch (err: any) {
@@ -465,6 +501,10 @@ async function startServer() {
   app.post("/api/sync/mode", async (req, res) => {
     try {
       const { pairId, syncMode, cloudCategory } = req.body;
+      if (!isValidString(pairId, 256) || !['mirror', 'streaming'].includes(syncMode) ||
+        (cloudCategory !== undefined && !['computers', 'shared'].includes(cloudCategory))) {
+        return res.status(400).json({ error: "modo de sincronización inválido" });
+      }
       await syncEngine.setPairMode(pairId, syncMode, cloudCategory);
       res.json({ success: true, status: syncEngine.getStatus() });
     } catch (err: any) {

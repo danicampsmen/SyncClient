@@ -7,6 +7,7 @@ import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager, VectorClock } from '../shared/VectorClock';
 import { scanChanges, computeBlockHashes, lazyHashBatch, isMtimeChanged, hasContentChanged, verifyReadWriteAccess, LocalEntry, ScanResult } from '../shared/Scanner';
 import { Md5 } from '../shared/md5';
+import { refreshAccessToken } from '../auth';
 
 export interface DriveFile {
   id: string;
@@ -819,7 +820,14 @@ export class SyncEngine {
 
   private async handleDriveResponse(res: Response, retryCount = 0): Promise<Response> {
     if (!res.ok) {
-      if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
+      if (res.status === 401) {
+        const refreshedToken = await refreshAccessToken();
+        if (refreshedToken) {
+          this.accessToken = refreshedToken;
+          throw new Error('TOKEN_REFRESHED_RETRY');
+        }
+        throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
+      }
       if (res.status === 412) throw new Error('DRIVE_PRECONDITION_FAILED_412');
       if (res.status === 304) return res;
       if (res.status === 429 || res.status === 403) {
@@ -843,10 +851,14 @@ export class SyncEngine {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         await this.rateLimit();
-        const res = await fetch(url, options);
+        const headers = new Headers(options.headers);
+        if (headers.has('Authorization') && this.accessToken) {
+          headers.set('Authorization', `Bearer ${this.accessToken}`);
+        }
+        const res = await fetch(url, { ...options, headers });
         return await this.handleDriveResponse(res, attempt);
       } catch (err: any) {
-        const retryable = err.message === 'RATE_LIMITED_RETRY' || err.message === 'SERVER_ERROR_RETRY' || /(?:ECONNRESET|ETIMEDOUT|ENOTFOUND|network|fetch failed)/i.test(err.message || '');
+        const retryable = err.message === 'TOKEN_REFRESHED_RETRY' || err.message === 'RATE_LIMITED_RETRY' || err.message === 'SERVER_ERROR_RETRY' || /(?:ECONNRESET|ETIMEDOUT|ENOTFOUND|network|fetch failed)/i.test(err.message || '');
         if (retryable) {
           if (attempt < maxRetries) continue;
           throw new Error(`Drive API: máximo de reintentos (${maxRetries}) alcanzado para ${url}`);

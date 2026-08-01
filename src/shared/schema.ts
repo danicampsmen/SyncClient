@@ -214,7 +214,9 @@ export interface SyncConflict {
     created_at: number;
 }
 
-/** Feature flag para activar/desactivar la nueva implementación */
-export const USE_V2_SYNC =
-    (typeof process !== 'undefined' && process.env?.SYNCCLIENT_V2 === 'true') ||
-    (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
+/**
+ * El motor legacy ya no implementa sincronización. Mantener un feature flag que
+ * pueda desactivarlo dejaría Android de producción marcando pares como "al día"
+ * sin transferir archivos; por eso v2 es el único motor soportado.
+ */
+export const USE_V2_SYNC = true;

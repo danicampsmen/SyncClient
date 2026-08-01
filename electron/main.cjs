@@ -35,7 +35,8 @@ function loadSecureStoreState() {
 
 async function persistSecureStoreState() {
   try {
-    fs.writeFileSync(secureStorePath, JSON.stringify(secureStoreState, null, 2));
+    fs.writeFileSync(secureStorePath, JSON.stringify(secureStoreState, null, 2), { mode: 0o600 });
+    fs.chmodSync(secureStorePath, 0o600);
   } catch (error) {
     console.error('[Electron] No se pudo persistir el store seguro local:', error?.message || error);
   }
@@ -51,10 +52,8 @@ ipcMain.handle('secure-store-set', async (_event, key, value) => {
       encrypted: encrypted.toString('base64'),
     };
   } else {
-    secureStoreState[key] = {
-      version: 0,
-      plain: value,
-    };
+    // Persistir refresh tokens sin cifrar anula el propósito de este bridge.
+    throw new Error('El almacenamiento cifrado del sistema no está disponible');
   }
   await persistSecureStoreState();
   return true;
@@ -73,7 +72,7 @@ ipcMain.handle('secure-store-get', async (_event, key) => {
       return null;
     }
   }
-  return item.plain || null;
+  return null;
 });
 
 ipcMain.handle('secure-store-remove', async (_event, key) => {
@@ -302,14 +301,17 @@ async function openGoogleAuth() {
   });
 }
 
-// Abrir URLs en el navegador nativo del sistema operativo
-ipcMain.handle('openExternal', async (event, url) => {
-  await shell.openExternal(url);
-});
+// Abrir únicamente URLs HTTPS en el navegador nativo. Los esquemas locales o
+// personalizados no deben poder ser invocados desde el renderer.
+function openTrustedExternal(url) {
+  if (typeof url !== 'string') throw new Error('URL externa inválida');
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:') throw new Error('Sólo se permiten URLs HTTPS externas');
+  return shell.openExternal(parsed.toString());
+}
 
-ipcMain.handle('open-external', async (_event, url) => {
-  if (url) await shell.openExternal(url);
-});
+ipcMain.handle('openExternal', async (_event, url) => openTrustedExternal(url));
+ipcMain.handle('open-external', async (_event, url) => openTrustedExternal(url));
 
 ipcMain.handle('set-auto-start', async (_event, enable) => {
   try {
@@ -481,8 +483,9 @@ app.whenReady().then(() => {
     contents.setUserAgent(firefoxUserAgent);
   });
 
-  // El backend ya es lanzado por concurrently (tsx server.ts). No es necesario cargarlo desde Electron.
-  // startBackend();
+  // Los paquetes instalables no ejecutan scripts de npm: deben iniciar su propio
+  // backend. En desarrollo y en `npm start` ya existe un backend externo.
+  if (app.isPackaged) startBackend();
   createTray();
   createWindow();
 
