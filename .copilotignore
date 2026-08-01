@@ -1,4 +1,6 @@
-# Exclusiones de contexto para herramientas Copilot compatibles
+# Exclusiones para clientes o herramientas que admitan .copilotignore.
+# GitHub Copilot no ofrece el mismo soporte para este archivo en todas sus
+# superficies; la directiva principal está en .github/copilot-instructions.md.
 node_modules/
 dist/
 release/
@@ -18,6 +20,8 @@ assets/
 *.zip
 *.tar
 *.gz
+*.asar
+*.map
 *.log
 *.db
 *.sqlite
@@ -27,6 +31,18 @@ bun.lock
 yarn.lock
 pnpm-lock.yaml
 package.json.tmp
+.env
+.env.*
+!.env.example
+firebase-applet-config.json
+google-services.json
+credentials.json
+*.pem
+*.key
+*.keystore
+*.jks
+*.p12
+*.pfx
 .aider*
 .idea/
 .kilo/

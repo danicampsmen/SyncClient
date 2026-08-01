@@ -21,6 +21,19 @@
     "**/.gradle/**": true,
     "**/android/app/build/**": true
   },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/release": true,
+    "**/build": true,
+    "**/out": true,
+    "**/.gradle": true,
+    "**/*.map": true,
+    "**/*.log": true,
+    "**/*.pdf": true,
+    "**/*.zip": true,
+    "**/package-lock.json": true
+  },
   "github.copilot.advanced": {
     "inlineSuggest.count": 1
   }
