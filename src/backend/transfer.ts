@@ -68,6 +68,14 @@ function retryDelay(attempt: number): number {
   return Math.min(32_000, base + Math.floor(Math.random() * Math.max(1, base / 2)));
 }
 
+function retryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
 function transientStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
@@ -103,7 +111,7 @@ export async function requestTransfer(
       }
       if (!transientStatus(response.status) || attempt === maxAttempts) return response;
       await response.body?.cancel();
-      await sleepFn(retryDelay(attempt));
+      await sleepFn(retryAfterMs(response.headers.get('retry-after')) ?? retryDelay(attempt));
     } catch (error) {
       lastError = error;
       if (error instanceof Error && error.message === 'UNAUTHORIZED_EXPIRED_TOKEN') throw error;

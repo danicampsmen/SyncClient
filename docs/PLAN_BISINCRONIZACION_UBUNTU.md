@@ -610,6 +610,19 @@ Simular y verificar:
 - Checksum incorrecto.
 - Archivos de varios gigabytes.
 
+Estado actual de la fase:
+
+- [Completada] Pruebas focalizadas para 429 con `Retry-After`, 403 de cuota,
+  500/502/503, `ETIMEDOUT`, `ECONNRESET` y `ENOTFOUND`.
+- [Completada] Se verifica que los fallos de red no confirman cursores ni
+  descartan operaciones independientes.
+- [Completada] Se cubren cursores invalidos, tombstones, modificaciones
+  simultaneas, lock entre procesos, liberacion idempotente durante apagado,
+  interrupciones de transferencia y checksum incorrecto.
+- Limitacion: el cierre del proceso real y la recuperacion de SQLite requieren
+  una prueba de integracion con procesos separados; estas pruebas unitarias
+  validan las primitivas deterministas sin datos reales.
+
 ## Fase 7 - Pruebas de escala
 
 Medir con 10.000 archivos, 100.000 archivos y aproximadamente 100 GB:
@@ -620,6 +633,17 @@ Medir con 10.000 archivos, 100.000 archivos y aproximadamente 100 GB:
 - Throughput con 1, 2 y 3 workers.
 - Tiempo de recuperacion tras reinicio.
 - Cero bucles en al menos tres ciclos de polling.
+
+Estado actual de la fase:
+
+- [Completada] Se incorporo `measureSyntheticSyncPlan()` como arnes acotado,
+  sin filesystem, Drive ni datos reales.
+- [Completada] La suite ejecuta escenarios sinteticos de 10.000 y 100.000
+  archivos y verifica que el plan conserva una subida por archivo.
+- Limitacion: no se reportan aun mediciones representativas de 100 GB,
+  memoria maxima, throughput por worker ni recuperacion de reinicio; deben
+  medirse en un entorno de rendimiento dedicado antes de declarar capacidad
+  operativa para ese volumen.
 
 # 4. Alternativas existentes y evidencia
 

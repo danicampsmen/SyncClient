@@ -63,6 +63,44 @@ describe('DriveChangesIngestor', () => {
     expect(delays).toContain(2000);
   });
 
+  it.each([500, 502, 503])('retries Drive server failure %s', async status => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({}, status))
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ newStartPageToken: 'final', changes: [] }));
+    await new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('surfaces quota denial without retrying or advancing the cursor', async () => {
+    const db = storage();
+    const fetcher = vi.fn().mockResolvedValue(response({ error: { reason: 'storageQuotaExceeded' } }, 403));
+    await expect(new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    )).rejects.toThrow('403');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+
+  it.each(['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND'])(
+    'retries network error %s before committing the cursor',
+    async code => {
+      const db = storage();
+      const fetcher = vi.fn()
+        .mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+        .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+        .mockResolvedValueOnce(response({ newStartPageToken: 'final', changes: [] }));
+      await new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+        { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+      );
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(db.setDriveCursor).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('adds shared-drive query parameters', async () => {
     const db = storage();
     const fetcher = vi.fn()

@@ -66,6 +66,49 @@ describe('resumable transfer helpers', () => {
     expect(delays[1]).toBeLessThan(3000);
   });
 
+  it('honors Retry-After for transfer throttling and does not retry quota errors', async () => {
+    const request = vi.fn<TransferHttpClient['request']>()
+      .mockResolvedValueOnce(response({}, 429, { 'Retry-After': '2' }))
+      .mockResolvedValueOnce(response({ ok: true }));
+    const delays: number[] = [];
+    await expect(requestTransfer(
+      client(request),
+      'https://upload.test/session',
+      () => ({ method: 'PUT' }),
+      3,
+      async milliseconds => { delays.push(milliseconds); },
+    )).resolves.toMatchObject({ status: 200 });
+    expect(delays).toEqual([2000]);
+
+    const quotaRequest = vi.fn<TransferHttpClient['request']>()
+      .mockResolvedValue(response({ error: { reason: 'storageQuotaExceeded' } }, 403));
+    await expect(requestTransfer(
+      client(quotaRequest),
+      'https://upload.test/session',
+      () => ({ method: 'PUT' }),
+      3,
+      async () => undefined,
+    )).resolves.toMatchObject({ status: 403 });
+    expect(quotaRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND'])(
+    'retries transient network error %s without discarding the operation',
+    async code => {
+      const request = vi.fn<TransferHttpClient['request']>()
+        .mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+        .mockResolvedValueOnce(response({ ok: true }));
+      await expect(requestTransfer(
+        client(request),
+        'https://upload.test/session',
+        () => ({ method: 'PUT' }),
+        3,
+        async () => undefined,
+      )).resolves.toMatchObject({ status: 200 });
+      expect(request).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('persists the resumable URI and confirmed offsets around each chunk', async () => {
     const { filePath } = await tempFile(600 * 1024);
     const persisted: PersistedUploadSession[] = [];
