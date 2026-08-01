@@ -139,3 +139,8 @@ La bisincronización de Ubuntu se planifica y valida en
 Priorizar cambios en `src/backend/`, `src/shared/`, SQLite y la integración de
 Google Drive. No implementar Android dentro de una tarea Ubuntu salvo que se
 solicite explícitamente una modificación compartida.
+
+La sincronización Android se planifica y valida en
+[`docs/PLAN_SINCRONIZACION_ANDROID.md`](docs/PLAN_SINCRONIZACION_ANDROID.md).
+Priorizar `src/services/SyncEngine.ts`, `CapacitorFS`, sidecars `.syncmeta`,
+SQLite/WASM, ciclo de vida Android y relay autenticado.

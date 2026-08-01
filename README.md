@@ -153,6 +153,9 @@ SyncClient detecta automáticamente archivos numerados como `Nota(1).pdf`, `Nota
 Para el plan técnico de Ubuntu, consulta
 [`docs/PLAN_BISINCRONIZACION_UBUNTU.md`](docs/PLAN_BISINCRONIZACION_UBUNTU.md).
 
+Para el plan técnico de Android, consulta
+[`docs/PLAN_SINCRONIZACION_ANDROID.md`](docs/PLAN_SINCRONIZACION_ANDROID.md).
+
 ## Licencia
 
 MIT — Desarrollado por Dani (danicampsmen@gmail.com)
