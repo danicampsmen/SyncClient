@@ -13,6 +13,16 @@ import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager, VectorClock } from '../shared/VectorClock';
 import { scanChanges, computeBlockHashes, lazyHashBatch, isMtimeChanged, hasContentChanged, verifyReadWriteAccess, LocalEntry, ScanResult } from '../shared/Scanner';
 import { downloadToAtomicFile, requestTransfer, RESUMABLE_UPLOAD_THRESHOLD, uploadResumableFile, type TransferHttpClient } from './transfer';
+import {
+  INITIAL_POLL_INTERVAL_MS,
+  SYNC_DEBOUNCE_MS,
+  TRANSFER_CONCURRENCY,
+  WRITE_STABILITY_POLL_INTERVAL_MS,
+  WRITE_STABILITY_THRESHOLD_MS,
+  nextSyncBackoff,
+  pollInterval,
+  shouldSkipPoll,
+} from './syncPerformance';
 
 export interface DriveFile {
   id: string;
@@ -82,9 +92,6 @@ class SyncEngine {
   private lastSyncCompleted: Record<string, number> = {};
   private syncBackoff: Record<string, number> = {};
   private syncTriggerSource: Record<string, 'fs-event' | 'poll' | 'manual'> = {};
-  private readonly SYNC_COOLDOWN_MS = 60000;
-  private readonly MAX_POLL_INTERVAL_MS = 900000;
-  private readonly INITIAL_POLL_MS = 30000;
   private readonly DRIVE_MAX_ATTEMPTS = 3;
   private readonly DRIVE_MIN_REQUEST_INTERVAL_MS = 200;
   private driveRequestTail: Promise<void> = Promise.resolve();
@@ -93,7 +100,7 @@ class SyncEngine {
   private async runInPool<T>(tasks: (() => Promise<T>)[], concurrency = 3): Promise<T[]> {
     const results: T[] = new Array(tasks.length);
     let index = 0;
-    const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
+    const workers = Array.from({ length: Math.min(concurrency, TRANSFER_CONCURRENCY, tasks.length) }, async () => {
       while (index < tasks.length) {
         const currentIndex = index++;
         try {
@@ -558,7 +565,10 @@ class SyncEngine {
               if (base.startsWith('.')) return true;
               return matchesIgnorePattern(base, this.settings.ignoredPatterns);
             },
-            persistent: true, ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 500 }
+            persistent: true, ignoreInitial: true, awaitWriteFinish: {
+              stabilityThreshold: WRITE_STABILITY_THRESHOLD_MS,
+              pollInterval: WRITE_STABILITY_POLL_INTERVAL_MS,
+            }
           });
 
           watcher.on('all', (event, filePath) => {
@@ -569,7 +579,7 @@ class SyncEngine {
             this.debounceTimers[pair.id] = setTimeout(() => {
               this.syncTriggerSource[pair.id] = 'fs-event';
               this.triggerSync(pair.id);
-            }, 3000);
+            }, SYNC_DEBOUNCE_MS);
           });
 
           watcher.on('error', (error) => {
@@ -606,14 +616,12 @@ class SyncEngine {
     this.pairs.forEach(pair => {
       const isWatchable = pair.status === 'syncing' || pair.status === 'idle';
       if (isWatchable && !this.intervalRefs[pair.id]) {
-        const getAdaptiveInterval = () => {
-          const backoff = this.syncBackoff[pair.id] || this.INITIAL_POLL_MS;
-          return Math.min(backoff, this.MAX_POLL_INTERVAL_MS);
-        };
-
         const scheduleNext = () => {
-          const interval = getAdaptiveInterval();
+          const interval = pollInterval(this.syncBackoff[pair.id]);
           this.intervalRefs[pair.id] = setTimeout(async () => {
+            delete this.intervalRefs[pair.id];
+            const currentPair = this.pairs.find(candidate => candidate.id === pair.id);
+            if (!currentPair || (currentPair.status !== 'syncing' && currentPair.status !== 'idle')) return;
             this.syncTriggerSource[pair.id] = 'poll';
             this.triggerSync(pair.id);
             scheduleNext();
@@ -639,10 +647,9 @@ class SyncEngine {
     if (!pair || pair.status === 'paused') return;
 
     const lastCompleted = this.lastSyncCompleted[pairId] || 0;
-    const elapsedSinceLastSync = Date.now() - lastCompleted;
     const triggerSource = this.syncTriggerSource[pairId] || 'manual';
 
-    if (triggerSource === 'poll' && elapsedSinceLastSync < this.SYNC_COOLDOWN_MS) {
+    if (triggerSource === 'poll' && shouldSkipPoll(lastCompleted, Date.now())) {
       this.syncTriggerSource[pairId] = 'manual';
       return;
     }
@@ -712,10 +719,10 @@ class SyncEngine {
       const bytesTransferred = pair.progress?.bytesTransferred ?? 0;
 
       if (filesProcessed === 0 && bytesTransferred === 0) {
-        const currentBackoff = this.syncBackoff[pairId] || this.INITIAL_POLL_MS;
-        this.syncBackoff[pairId] = Math.min(currentBackoff * 2, this.MAX_POLL_INTERVAL_MS);
+        const currentBackoff = this.syncBackoff[pairId] || INITIAL_POLL_INTERVAL_MS;
+        this.syncBackoff[pairId] = nextSyncBackoff(currentBackoff);
       } else {
-        this.syncBackoff[pairId] = this.INITIAL_POLL_MS;
+        this.syncBackoff[pairId] = INITIAL_POLL_INTERVAL_MS;
       }
       this.syncTriggerSource[pairId] = 'manual';
 

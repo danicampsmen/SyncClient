@@ -580,12 +580,17 @@ Estado actual de la fase:
 
 ## Fase 5 - Watcher y rendimiento
 
-- Mantener `markSelfWritten`, `isSelfWritten` y `activeSyncs`.
-- Debounce de 5 segundos.
-- `awaitWriteFinish` con estabilidad de 5 segundos.
-- Concurrencia de 2-3 transferencias.
-- Polling remoto de 30-120 segundos con backoff adaptativo.
-- Rescan completo solo en inicializacion, recuperacion o mantenimiento.
+- [Completada] Mantener `markSelfWritten`, `isSelfWritten` y `activeSyncs`.
+- [Completada] Debounce de 5 segundos.
+- [Completada] `awaitWriteFinish` con estabilidad de 5 segundos y polling de 1
+  segundo.
+- [Completada] Limitar el pool de transferencias a un maximo de 3 tareas.
+- [Completada] Polling remoto desde 30 segundos con backoff adaptativo hasta 15
+  minutos y cooldown obligatorio de 60 segundos.
+- [Completada] Invalidar la cache de carpetas tras cada sincronizacion y evitar
+  timers de polling huerfanos cuando una pareja deja de estar activa.
+- Pendiente: sustituir el listado recursivo por `changes.list` en el flujo
+  principal para reducir rescans completos.
 
 ## Fase 6 - Validacion de fallos
 
