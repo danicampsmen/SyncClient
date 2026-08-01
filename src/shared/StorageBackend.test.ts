@@ -62,8 +62,11 @@ describe('SQLiteBackend Phase 1 persistence', () => {
             local_hash: 'local',
             remote_hash: 'remote',
             base_hash: 'base',
+            remote_id: 'remote-id-1',
+            reason: 'both_modified',
             resolution: 'pending',
             created_at: Date.now(),
+            updated_at: Date.now(),
         });
 
         expect(backend.getDriveCursor({

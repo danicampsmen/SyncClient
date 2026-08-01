@@ -78,11 +78,16 @@ export interface SyncEvent {
 export interface PendingConflict {
   id: string;
   pairId: string;
-  relativePath: string;
   localPath: string;
-  localMtime: number;
+  relativePath: string;
   remoteFileId: string;
   remoteFileName: string;
+  reason: string | null;
+  baseHash: string | null;
+  localSize: number | null;
+  localMtime: number;
+  remoteSize: number | null;
   remoteMtime: number;
+  resolved: boolean;
   timestamp: number;
 }

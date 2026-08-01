@@ -79,7 +79,17 @@ function rowToUploadSession(row: any): UploadSession {
 }
 
 function rowToSyncConflict(row: any): SyncConflict {
-    return { ...row, local_hash: row.local_hash ?? null, remote_hash: row.remote_hash ?? null, base_hash: row.base_hash ?? null };
+    return {
+        ...row,
+        local_hash: row.local_hash ?? null,
+        remote_hash: row.remote_hash ?? null,
+        base_hash: row.base_hash ?? null,
+        remote_id: row.remote_id ?? null,
+        reason: row.reason ?? null,
+        resolution: row.resolution ?? 'pending',
+        created_at: row.created_at ?? 0,
+        updated_at: row.updated_at ?? 0,
+    };
 }
 
 function applyMigrations(db: any, wasm: boolean): void {
@@ -184,11 +194,16 @@ export class SQLiteBackend implements IStorageBackend {
         if (this.db) {
             if (isCapacitor()) {
                 // sql.js (WASM)
-                await this.checkpoint(); // Guardar WAL a la base de datos principal
-                const data = this.db.export();
-                await this.fs.writeFile(this.dbPath, data);
-                this.db.close();
-                console.log('[SQLiteBackend/WASM] Database saved and closed.');
+                if (this.fs) { // DB-3: Prevenir error si fs no está disponible
+                    await this.checkpoint(); // Guardar WAL a la base de datos principal
+                    const data = this.db.export();
+                    await this.fs.writeFile(this.dbPath, data);
+                    this.db.close();
+                    console.log('[SQLiteBackend/WASM] Database saved and closed.');
+                } else {
+                    console.warn('[SQLiteBackend/WASM] Filesystem not available, cannot save database.');
+                    this.db.close();
+                }
             } else {
                 // better-sqlite3 (Nativo)
                 this.db.close();
@@ -199,15 +214,9 @@ export class SQLiteBackend implements IStorageBackend {
     }
 
     private initNative(createRequire: (url: string | URL) => NodeRequire): boolean {
-        // Compatible ESM (import.meta.url) y CJS (__filename via url.pathToFileURL)
-        let callerUrl: string;
-        if (typeof import.meta !== 'undefined' && import.meta.url) {
-            callerUrl = import.meta.url;
-        } else {
-            // En CJS, import.meta no existe. Usar __filename via require('url')
-            const urlMod = createRequire('file:///')('url');
-            callerUrl = urlMod.pathToFileURL(__filename).href;
-        }
+        // En CJS, import.meta no existe. Usar __filename via require('url')
+        const urlMod = createRequire('file:///')('url');
+        const callerUrl = urlMod.pathToFileURL(__filename).href;
         const _require = createRequire(callerUrl);
         const Database = _require('better-sqlite3');
         const path = _require('path') as typeof import('path');
@@ -563,18 +572,18 @@ export class SQLiteBackend implements IStorageBackend {
 
     setConflict(conflict: SyncConflict): void {
         const sql = `INSERT OR REPLACE INTO sync_conflicts
-            (id, pair_id, rel_path, local_hash, remote_hash, base_hash, resolution, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+            (id, pair_id, rel_path, local_hash, remote_hash, base_hash, remote_id, reason, resolution, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
         const params = [conflict.id, conflict.pair_id, conflict.rel_path, conflict.local_hash,
-        conflict.remote_hash, conflict.base_hash, conflict.resolution, conflict.created_at];
+        conflict.remote_hash, conflict.base_hash, conflict.remote_id, conflict.reason, conflict.resolution, conflict.created_at, conflict.updated_at];
         if (isCapacitor()) this.db.run(sql, params);
         else this.db.prepare(sql).run(...params);
     }
 
     resolveConflict(id: string, resolution: string): void {
-        const sql = 'UPDATE sync_conflicts SET resolution = ? WHERE id = ?';
-        if (isCapacitor()) this.db.run(sql, [resolution, id]);
-        else this.db.prepare(sql).run(resolution, id);
+        const sql = 'UPDATE sync_conflicts SET resolution = ?, updated_at = ? WHERE id = ?';
+        if (isCapacitor()) this.db.run(sql, [resolution, Date.now(), id]);
+        else this.db.prepare(sql).run(resolution, Date.now(), id);
     }
 
     getPendingConflicts(pairId: string): SyncConflict[] {
@@ -897,9 +906,10 @@ export class JSONBackend implements IStorageBackend {
 
     resolveConflict(id: string, resolution: string): void {
         const conflict = this.data.conflicts[id];
-        if (!conflict) return;
-        conflict.resolution = resolution;
-        this.dirty = true;
+        if (conflict) {
+            conflict.resolution = resolution;
+            this.dirty = true;
+        }
     }
 
     getPendingConflicts(pairId: string): SyncConflict[] {
@@ -908,6 +918,7 @@ export class JSONBackend implements IStorageBackend {
             .sort((a, b) => a.created_at - b.created_at);
     }
 
+    // Mantenimiento
     vacuum(): void {
         const cutoff = Date.now() - 30 * 86400_000;
         this.data.journal = this.data.journal.filter(
@@ -935,6 +946,10 @@ export class JSONBackend implements IStorageBackend {
         } catch (e) {
             console.error('[JSONBackend] Checkpoint failed:', e);
         }
+    }
+
+    async close(): Promise<void> {
+        await this.checkpoint();
     }
 }
 

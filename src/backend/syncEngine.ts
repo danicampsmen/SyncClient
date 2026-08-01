@@ -27,6 +27,8 @@ import {
   shouldSkipPoll,
 } from './syncPerformance';
 
+const SYNCCLIENT_DEBUG = process.env.SYNCCLIENT_DEBUG === 'true';
+
 export interface DriveFile {
   id: string;
   name: string;
@@ -529,7 +531,7 @@ export class SyncEngine {
   public getStatus() {
     return {
       pairs: this.pairs, events: this.events, settings: this.settings,
-      pendingConflicts: this.pendingConflicts, authenticated: !!this.accessToken,
+      pendingConflicts: this.pendingConflicts,
       detectedExternalDrives: this.detectedExternalDrives
     };
   }
@@ -780,8 +782,12 @@ export class SyncEngine {
           });
 
           watcher.on('all', (event, filePath) => {
-            if (this.activeSyncs.has(pair.id)) return;
-            if (this.isSelfWritten(filePath)) return;
+            if (this.activeSyncs.has(pair.id)) {
+              return;
+            }
+            if (this.isSelfWritten(filePath)) {
+              return;
+            }
 
             if (this.debounceTimers[pair.id]) clearTimeout(this.debounceTimers[pair.id]);
             this.debounceTimers[pair.id] = setTimeout(() => {
@@ -853,32 +859,12 @@ export class SyncEngine {
     });
   }
 
-  public async triggerSync(pairId: string) {
-    if (!this.accessToken) return;
-    const pair = this.pairs.find(p => p.id === pairId);
-    if (!pair || pair.status === 'paused') return;
 
-    const lastCompleted = this.lastSyncCompleted[pairId] || 0;
-    const triggerSource = this.syncTriggerSource[pairId] || 'manual';
 
-    if (triggerSource === 'poll' && shouldSkipPoll(lastCompleted, Date.now())) {
-      this.syncTriggerSource[pairId] = 'manual';
-      return;
-    }
-
-    if (this.activeSyncs.has(pairId)) {
-      this.pendingSyncs.add(pairId);
-      return;
-    }
-
-    this.activeSyncs.add(pairId);
-    pair.status = 'syncing';
-    pair.progress = { currentFile: 'Verificando carpetas y duplicados...', totalFiles: 0, currentFileIndex: 0, bytesTransferred: 0, totalBytes: 0, percentage: 0, action: 'comprobando' };
-
-    let pairLock: PairLock | null = null;
+  private async runSync(pair: SyncPair, pairLock: PairLock): Promise<void> {
+    const pairId = pair.id;
     let driveChangeBatch: { pageToken: string; controlledRescan: boolean } | null = null;
     try {
-      pairLock = await acquirePairLock(this.sharedPairLockDirectory(), pairId);
       let remoteFolderId = 'root';
       let remotePathParts = pair.remotePath.replace(/^(RemoteServer|GoogleDrive|Drive):/, '').replace(/^[\/\\]+/, '').split('/').filter(Boolean);
 
@@ -910,8 +896,13 @@ export class SyncEngine {
           this.commitDriveChangesCursor(pair, driveChangeBatch.pageToken);
         }
       } else {
-        if (!this.manifests[pair.id]) this.manifests[pair.id] = {};
-        await this.syncDirectoryTree(pair.localPath, remoteFolderId, pair, '');
+        if (!this.db || !this.DEVICE_ID) {
+          throw new Error('Native v2 sync requires an initialized database and device id; cannot sync pair');
+        }
+        const syncCompleted = await this.v2SyncDirectoryTree(pair.localPath, remoteFolderId, pair, '');
+        if (!syncCompleted && (pair.status as string) !== 'paused') {
+          throw new Error('Native sync did not complete; pending work was retained');
+        }
       }
 
       pair.lastSynced = Date.now();
@@ -932,28 +923,21 @@ export class SyncEngine {
       setTimeout(() => { if (pair && pair.status === 'idle') { pair.progress = null; this.saveState(); } }, 4000);
       await this.saveState();
     } catch (err: unknown) {
-      if (err instanceof PairAlreadyRunningError) {
-        console.warn(`[SyncEngine/Lock] pair=${pairId} is already active in another engine; work remains queued`);
-        pair.status = 'idle';
-      } else if (err instanceof Error && err.message === 'UNAUTHORIZED_EXPIRED_TOKEN') pair.status = 'unauthenticated';
+      if (err instanceof Error && err.message === 'UNAUTHORIZED_EXPIRED_TOKEN') pair.status = 'unauthenticated';
       else pair.status = 'error';
       pair.progress = null;
-      if (!(err instanceof PairAlreadyRunningError)) {
-        console.error(`[SyncEngine] pair=${pairId} sync failed; recoverable state was retained:`, err instanceof Error ? err.message : String(err));
-        this.addEvent({
-          id: Math.random().toString(36).slice(2, 11), pairId, filename: pair.localPath,
-          action: 'info', timestamp: Date.now(),
-          details: `Synchronization failed: ${err instanceof Error ? err.message : String(err)}`,
-        }, true);
-      }
+      console.error(`[SyncEngine] pair=${pairId} sync failed; recoverable state was retained:`, err instanceof Error ? err.message : String(err));
+      this.addEvent({
+        id: Math.random().toString(36).slice(2, 11), pairId, filename: pair.localPath,
+        action: 'info', timestamp: Date.now(),
+        details: `Synchronization failed: ${err instanceof Error ? err.message : String(err)}`,
+      }, true);
       await this.saveState();
     } finally {
-      if (pairLock) {
-        try {
-          await pairLock.release();
-        } catch (error) {
-          console.error(`[SyncEngine/Lock] Could not release pair ${pairId}; manual recovery may be required:`, error instanceof Error ? error.message : String(error));
-        }
+      try {
+        await pairLock.release();
+      } catch (error) {
+        console.error(`[SyncEngine/Lock] Could not release pair ${pairId}; manual recovery may be required:`, error instanceof Error ? error.message : String(error));
       }
       this.activeSyncs.delete(pairId);
       this.driveFolderCache.clear();
@@ -963,13 +947,10 @@ export class SyncEngine {
       const filesProcessed = pair.progress?.currentFileIndex ?? 0;
       const bytesTransferred = pair.progress?.bytesTransferred ?? 0;
 
-      // Increment backoff regardless of file processing outcome (network errors, permission issues)
-      // This ensures exponential backoff after any failed sync attempt
       if (filesProcessed === 0 && bytesTransferred === 0) {
         const currentBackoff = this.syncBackoff[pairId] || INITIAL_POLL_INTERVAL_MS;
         this.syncBackoff[pairId] = nextSyncBackoff(currentBackoff);
       } else if (!this.isDriveChangesEnabled()) {
-        // Still increment backoff even when drive changes are disabled to prevent rapid retries
         const currentBackoff = this.syncBackoff[pairId] || INITIAL_POLL_INTERVAL_MS;
         this.syncBackoff[pairId] = nextSyncBackoff(currentBackoff);
       } else {
@@ -982,6 +963,43 @@ export class SyncEngine {
         setTimeout(() => this.triggerSync(pairId), 5000);
       }
     }
+  }
+
+  public async triggerSync(pairId: string) {
+    if (!this.accessToken) return;
+    const pair = this.pairs.find(p => p.id === pairId);
+    if (!pair || pair.status === 'paused') return;
+
+    const lastCompleted = this.lastSyncCompleted[pairId] || 0;
+    const triggerSource = this.syncTriggerSource[pairId] || 'manual';
+
+    if (triggerSource === 'poll' && shouldSkipPoll(lastCompleted, Date.now())) {
+      this.syncTriggerSource[pairId] = 'manual';
+      return;
+    }
+
+    if (this.activeSyncs.has(pairId)) {
+      this.pendingSyncs.add(pairId);
+      return;
+    }
+
+    let pairLock: PairLock | null = null;
+    try {
+      pairLock = await acquirePairLock(this.sharedPairLockDirectory(), pairId);
+    } catch (err: unknown) {
+      if (err instanceof PairAlreadyRunningError) {
+        console.warn(`[SyncEngine/Lock] pair=${pairId} is already active in another engine; work remains queued`);
+      } else {
+        console.error(`[SyncEngine] pair=${pairId} lock acquisition failed; sync will be skipped:`, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    this.activeSyncs.add(pairId);
+    pair.status = 'syncing';
+    pair.progress = { currentFile: 'Verificando carpetas y duplicados...', totalFiles: 0, currentFileIndex: 0, bytesTransferred: 0, totalBytes: 0, percentage: 0, action: 'comprobando' };
+
+    this.runSync(pair, pairLock);
   }
 
   // ─── v2: SyncDirectoryTree con 5 fases ─────────────────────────
@@ -1068,30 +1086,42 @@ export class SyncEngine {
     }
 
     const plan = CoreSyncLogic.computeSyncPlan(localSnapshot, remoteSnapshot, dbStateForPlan, this.DEVICE_ID);
+
     for (const conflict of plan.conflicts) {
       const conflictId = `${pair.id}:${conflict.localPath}:${conflict.remoteFile.id}:${conflict.baseHash ?? 'none'}`;
-      this.db.setConflict({
-        id: conflictId,
-        pair_id: pair.id,
-        rel_path: conflict.localPath,
-        local_hash: conflict.localHash ?? null,
-        remote_hash: conflict.remoteHash ?? null,
-        base_hash: conflict.baseHash ?? null,
-        resolution: 'pending',
-        created_at: Date.now(),
-      });
-      if (!this.pendingConflicts.some(existing => existing.id === conflictId)) {
+      if (!this.pendingConflicts.some(c => c.id === conflictId)) {
         this.pendingConflicts.push({
           id: conflictId,
           pairId: pair.id,
-          relativePath: conflict.localPath,
           localPath: conflict.localPath,
-          localMtime: 0,
+          relativePath: conflict.localPath,
           remoteFileId: conflict.remoteFile.id,
           remoteFileName: conflict.remoteFile.name,
+          reason: conflict.reason ?? null,
+          baseHash: conflict.baseHash ?? null,
+          localSize: localSnapshot.get(conflict.localPath)?.size ?? null,
+          localMtime: localSnapshot.get(conflict.localPath)?.mtime ?? 0,
+          remoteSize: conflict.remoteFile.size ? parseInt(conflict.remoteFile.size, 10) : null,
           remoteMtime: new Date(conflict.remoteFile.modifiedTime).getTime(),
-          timestamp: Date.now(),
+          resolved: false,
+          timestamp: Date.now()
         });
+
+        if (this.db) {
+          this.db.setConflict({
+            id: conflictId,
+            pair_id: pair.id,
+            rel_path: conflict.localPath,
+            local_hash: conflict.localHash ?? null,
+            remote_hash: conflict.remoteHash ?? null,
+            base_hash: conflict.baseHash ?? null,
+            remote_id: conflict.remoteFile.id,
+            reason: conflict.reason ?? null,
+            resolution: 'pending',
+            created_at: Date.now(),
+            updated_at: Date.now(),
+          });
+        }
       }
     }
     const completedUploads = new Set<string>();
@@ -1150,7 +1180,6 @@ export class SyncEngine {
           filename: upload.remoteName, action: 'info', timestamp: Date.now(),
           details: `Upload failed: ${e instanceof Error ? e.message : String(e)}`,
         }, true);
-        if (e.message === 'UNAUTHORIZED_EXPIRED_TOKEN') throw e;
       }
     }
 
@@ -1185,7 +1214,6 @@ export class SyncEngine {
           filename: download.remoteFile.name, action: 'info', timestamp: Date.now(),
           details: `Download failed: ${e instanceof Error ? e.message : String(e)}`,
         }, true);
-        if (e.message === 'UNAUTHORIZED_EXPIRED_TOKEN') throw e;
       }
     }
 
@@ -1333,7 +1361,6 @@ export class SyncEngine {
 
         if (res.status === 304) continue;
         if (res.status === 404) { pendingDeletes.push(relPath); continue; }
-        if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
         await this.handleDriveResponse(res);
 
         if (res.ok) {
@@ -1360,12 +1387,7 @@ export class SyncEngine {
     }
   }
 
-  // ─── Legacy syncDirectoryTree ────────────────────
-  private async deduplicateLocalFolder(localDir: string, pairId?: string, relativePrefix = ''): Promise<{ deleted: number; renamed: number }> { return { deleted: 0, renamed: 0 }; }
-  private async deduplicateDriveFolder(remoteFolderId: string, pairId?: string, relativePrefix = ''): Promise<{ deleted: number; renamed: number }> { return { deleted: 0, renamed: 0 }; }
-  private async renameDriveFile(fileId: string, newName: string, parentId: string): Promise<void> { }
-  private async syncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = '') { }
-
+  // ─── Engine internals ────────────────────
   private addEvent(ev: SyncEvent, skipSave = false) {
     this.events.unshift(ev);
     if (this.events.length > 200) this.events.pop();
@@ -1378,7 +1400,6 @@ export class SyncEngine {
         const refreshed = await this.refreshAccessToken();
         if (refreshed) throw new Error('TOKEN_REFRESHED_RETRY');
         this.accessToken = null;
-        throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
       }
       if (res.status === 412) throw new Error('DRIVE_PRECONDITION_FAILED_412');
       if (res.status === 304) return res;
@@ -1415,13 +1436,22 @@ export class SyncEngine {
 
   private async createDriveFolder(parentId: string, name: string): Promise<DriveFile> {
     this.driveFolderCache.delete(parentId);
-    const res = await this.driveRequest('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime,webViewLink', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
-    });
-    await this.handleDriveResponse(res);
-    return (await res.json()) as DriveFile;
+    try {
+      const res = await this.driveRequest('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,modifiedTime,webViewLink', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+      });
+      await this.handleDriveResponse(res);
+      return (await res.json()) as DriveFile;
+    } catch (err: any) {
+      if (err.message && err.message.includes('412')) {
+        const files = await this.listDriveFiles(parentId, true);
+        const existing = files.find(f => f.name === name && f.mimeType === 'application/vnd.google-apps.folder');
+        if (existing) return existing;
+      }
+      throw err;
+    }
   }
 
   private async deleteDriveFile(fileId: string, parentId?: string): Promise<void> {

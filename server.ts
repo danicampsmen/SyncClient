@@ -143,6 +143,8 @@ async function startServer() {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Vary', 'Origin');
+    // Permitir que la ventana emergente de OAuth se comunique con la app principal
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE, PATCH');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-SyncClient-Client');
     if (req.method === 'OPTIONS') {
@@ -205,7 +207,7 @@ async function startServer() {
     }
     res.setHeader('Cache-Control', 'no-store');
     const response: { authenticated: boolean; sessionToken?: string } = { authenticated: true };
-    if (req.get('X-SyncClient-Client') === 'android') response.sessionToken = sessionId;
+    if (req.get('X-SyncClient-Client') === 'android') response.sessionToken = sessionId || undefined;
     res.json(response);
   });
 

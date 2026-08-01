@@ -53,7 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_file_states_pair ON file_states(pair_id);
 CREATE INDEX IF NOT EXISTS idx_file_states_tombstone ON file_states(is_tombstone, updated_at);
 `;
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const MIGRATION_SQL: ReadonlyArray<{ version: number; sql: string }> = [
     {
@@ -119,6 +119,15 @@ export const MIGRATION_SQL: ReadonlyArray<{ version: number; sql: string }> = [
         sql: `
         ALTER TABLE upload_sessions ADD COLUMN source_hash TEXT;
         UPDATE schema_metadata SET value = '3' WHERE key = 'version';
+        `,
+    },
+    {
+        version: 4,
+        sql: `
+        ALTER TABLE sync_conflicts ADD COLUMN remote_id TEXT;
+        ALTER TABLE sync_conflicts ADD COLUMN reason TEXT;
+        ALTER TABLE sync_conflicts ADD COLUMN updated_at INTEGER;
+        UPDATE schema_metadata SET value = '4' WHERE key = 'version';
         `,
     },
 ];
@@ -210,8 +219,11 @@ export interface SyncConflict {
     local_hash: string | null;
     remote_hash: string | null;
     base_hash: string | null;
+    remote_id: string | null;
+    reason: string | null;
     resolution: string;
     created_at: number;
+    updated_at: number;
 }
 
 /**
