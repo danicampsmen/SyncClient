@@ -60,6 +60,10 @@ export interface IStorageBackend {
     resolveConflict(id: string, resolution: string): void;
     getPendingConflicts(pairId: string): SyncConflict[];
 
+    // Recuperación de transferencias
+    getIncompleteTransfers(pairId: string): SyncOperation[];
+    clearIncompleteTransfers(pairId: string): void;
+
     // Mantenimiento
     vacuum(): void;
     checkpoint(): Promise<void>;
@@ -131,7 +135,10 @@ function applyMigrations(db: any, wasm: boolean): void {
 // ─── Detección de plataforma ────────────────────────────────────
 
 function isCapacitor(): boolean {
-    return typeof (globalThis as any).Capacitor !== 'undefined';
+    // IMPORTANTE: @capacitor/core define `globalThis.Capacitor` incluso en Node.js/desktop.
+    // Debemos verificar además que estemos en plataforma nativa (Android/iOS).
+    const cap = (globalThis as any).Capacitor;
+    return typeof cap !== 'undefined' && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform() === true;
 }
 
 // ─── Utilidades ──────────────────────────────────────────────────
@@ -214,9 +221,10 @@ export class SQLiteBackend implements IStorageBackend {
     }
 
     private initNative(createRequire: (url: string | URL) => NodeRequire): boolean {
-        // En CJS, import.meta no existe. Usar __filename via require('url')
         const urlMod = createRequire('file:///')('url');
-        const callerUrl = urlMod.pathToFileURL(__filename).href;
+        const callerUrl = typeof __filename !== 'undefined'
+            ? urlMod.pathToFileURL(__filename).href
+            : 'file://' + process.cwd() + '/src/shared/StorageBackend.ts';
         const _require = createRequire(callerUrl);
         const Database = _require('better-sqlite3');
         const path = _require('path') as typeof import('path');
@@ -331,18 +339,29 @@ export class SQLiteBackend implements IStorageBackend {
     // ─── CRUD (síncrono) ─────────────────────────────────────────
 
     getFileState(pairId: string, relPath: string): FileState | null {
-        const stmt = this.db.prepare('SELECT * FROM file_states WHERE pair_id = ? AND rel_path = ?');
+        const query = `
+            SELECT pair_id, rel_path, remote_id, local_mtime, remote_mtime, file_size,
+                   md5_hash, block_hashes, vector_clock, device_id, etag, updated_at, is_tombstone
+            FROM file_states
+            WHERE pair_id = ? AND rel_path = ?
+        `;
         const row = isCapacitor()
-            ? this._wasmGet(stmt, [pairId, relPath])
-            : stmt.get(pairId, relPath);
+            ? this._wasmGet(this.db.prepare(query), [pairId, relPath])
+            : this.db.prepare(query).get(pairId, relPath);
         return row ? rowToFileState(row) : null;
     }
 
     getFolderState(pairId: string): Map<string, FileState> {
         const map = new Map<string, FileState>();
+        const query = `
+            SELECT pair_id, rel_path, remote_id, local_mtime, remote_mtime, file_size,
+                   md5_hash, block_hashes, vector_clock, device_id, etag, updated_at, is_tombstone
+            FROM file_states
+            WHERE pair_id = ?
+        `;
         const rows = isCapacitor()
-            ? this._wasmAll(this.db.prepare('SELECT * FROM file_states WHERE pair_id = ?'), [pairId])
-            : this.db.prepare('SELECT * FROM file_states WHERE pair_id = ?').all(pairId);
+            ? this._wasmAll(this.db.prepare(query), [pairId])
+            : this.db.prepare(query).all(pairId);
         for (const row of rows) {
             map.set(row.rel_path, rowToFileState(row));
         }
@@ -440,7 +459,18 @@ export class SQLiteBackend implements IStorageBackend {
     getDeviceInfo(deviceId: string): DeviceInfo | null {
         const stmt = this.db.prepare('SELECT * FROM devices WHERE device_id = ?');
         const row = isCapacitor() ? this._wasmGet(stmt, [deviceId]) : stmt.get(deviceId);
-        return row ? row as DeviceInfo : null;
+        if (row) return row as DeviceInfo;
+
+        // IMPORTANTE: getOrCreateDeviceId consulta con la clave fija 'self',
+        // pero setDeviceInfo guarda con info.device_id (el UUID real).
+        // Fallback: si pedimos 'self' y no existe, devolver el dispositivo más reciente
+        // para que el device_id sea ESTABLE entre reinicios.
+        if (deviceId === 'self') {
+            const latestStmt = this.db.prepare('SELECT * FROM devices ORDER BY last_seen DESC LIMIT 1');
+            const latest = isCapacitor() ? this._wasmGet(latestStmt, []) : latestStmt.get();
+            if (latest) return latest as DeviceInfo;
+        }
+        return null;
     }
 
     setDeviceInfo(deviceId: string, info: DeviceInfo): void {
@@ -500,6 +530,21 @@ export class SQLiteBackend implements IStorageBackend {
             )
             : this.db.prepare("SELECT * FROM sync_journal WHERE pair_id = ? AND status = 'pending'").all(pairId);
         return rows;
+    }
+
+    getIncompleteTransfers(pairId: string): SyncOperation[] {
+        const rows = isCapacitor()
+            ? this._wasmAll(this.db.prepare("SELECT * FROM sync_operations WHERE pair_id = ? AND status != 'done'"), [pairId])
+            : this.db.prepare("SELECT * FROM sync_operations WHERE pair_id = ? AND status != 'done'").all(pairId);
+        return rows.map(rowToSyncOperation);
+    }
+
+    clearIncompleteTransfers(pairId: string): void {
+        if (isCapacitor()) {
+            this.db.run("DELETE FROM sync_operations WHERE pair_id = ? AND status != 'done'", [pairId]);
+        } else {
+            this.db.prepare("DELETE FROM sync_operations WHERE pair_id = ? AND status != 'done'").run(pairId);
+        }
     }
 
     getDriveCursor(key: Pick<DriveCursor, 'pair_id' | 'account_id' | 'corpus_id' | 'drive_id'>): DriveCursor | null {
@@ -666,8 +711,8 @@ export class SQLiteBackend implements IStorageBackend {
     /** Ejecutar stmt.get() en sql.js (que no tiene API idéntica a better-sqlite3) */
     private _wasmGet(stmt: any, params: any[]): any {
         stmt.bind(params);
+        const cols = stmt.getColumnNames();
         if (stmt.step()) {
-            const cols = stmt.getColumnNames();
             const vals = stmt.get();
             stmt.free();
             const obj: any = {};
@@ -680,8 +725,8 @@ export class SQLiteBackend implements IStorageBackend {
 
     private _wasmAll(stmt: any, params: any[]): any[] {
         stmt.bind(params);
-        const results: any[] = [];
         const cols = stmt.getColumnNames();
+        const results: any[] = [];
         while (stmt.step()) {
             const vals = stmt.get();
             const obj: any = {};
@@ -916,6 +961,19 @@ export class JSONBackend implements IStorageBackend {
         return Object.values(this.data.conflicts)
             .filter(conflict => conflict.pair_id === pairId && conflict.resolution === 'pending')
             .sort((a, b) => a.created_at - b.created_at);
+    }
+
+    getIncompleteTransfers(pairId: string): SyncOperation[] {
+        return Object.values(this.data.operations).filter(op => op.pair_id === pairId && op.status !== 'done');
+    }
+
+    clearIncompleteTransfers(pairId: string): void {
+        for (const id in this.data.operations) {
+            if (this.data.operations[id].pair_id === pairId && this.data.operations[id].status !== 'done') {
+                delete this.data.operations[id];
+            }
+        }
+        this.dirty = true;
     }
 
     // Mantenimiento

@@ -3,13 +3,17 @@ const path = require('path');
 const fs = require('fs');
 
 const firefoxUserAgent = 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0';
-app.commandLine.appendSwitch('disable-features', 'UserAgentClientHint');
-app.commandLine.appendSwitch('user-agent', firefoxUserAgent);
-if (process.platform === 'linux') {
-  // Evitar señales SIGTRAP en compositores Linux Wayland/X11 y al cerrar ventanas secundarias
-  app.commandLine.appendSwitch('disable-gpu-sandbox');
-  app.commandLine.appendSwitch('disable-dev-shm-usage');
-}
+
+app.whenReady().then(() => {
+  app.commandLine.appendSwitch('disable-features', 'UserAgentClientHint');
+  app.commandLine.appendSwitch('user-agent', firefoxUserAgent);
+  if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('disable-gpu-sandbox');
+    app.commandLine.appendSwitch('disable-dev-shm-usage');
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+    app.commandLine.appendSwitch('force-dark-mode');
+  }
+});
 
 let mainWindow = null;
 let tray = null;
@@ -398,6 +402,7 @@ function createTray() {
 }
 
 function createWindow() {
+  const mainSession = session.fromPartition('main', { cache: true });
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -408,6 +413,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
+      session: mainSession,
     }
   });
 
@@ -462,6 +468,13 @@ function createWindow() {
         if (!mainWindow || mainWindow.isDestroyed()) return;
         await mainWindow.loadURL('http://localhost:3000');
         console.log('[Electron] Conexión establecida con el servidor backend.');
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+        mainWindow.webContents.on('did-finish-load', () => {
+          console.log('[Electron] Frontend cargado correctamente.');
+        });
+        mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+          console.error('[Electron] Fallo al cargar frontend:', errorCode, errorDescription);
+        });
         return;
       } catch (e) {
         console.log(`[Electron] Servidor backend iniciando, reintentando (${i + 1}/30)...`);
@@ -472,10 +485,9 @@ function createWindow() {
   loadWhenReady();
 }
 
-// Prevenir problemas de renderizado de ventana blanca en entornos Linux Wayland / X11
-app.commandLine.appendSwitch('disable-gpu-compositing');
-
 app.whenReady().then(() => {
+  app.commandLine.appendSwitch('disable-gpu-compositing');
+
   // Enmascarar User-Agent como Firefox de Linux para todo el entorno web
   session.defaultSession.setUserAgent(firefoxUserAgent);
 

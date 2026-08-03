@@ -563,7 +563,7 @@ export class SyncEngine {
 
     const remoteFiles = await this.listDriveFiles(remoteFolderId, true);
 
-    const localSnapshot = new Map<string, { name: string; mtime: number; size: number }>();
+    const localSnapshot = new Map<string, { name: string; mtime: number; size: number; hash?: string }>();
 
     // 1. Rellenar con todos los archivos vivos de la BD
     for (const [relPath, state] of dbState) {
@@ -575,10 +575,10 @@ export class SyncEngine {
     }
     // 2. Sobrescribir con cambios reales del escáner
     for (const [relPath, entry] of scanResult.changed) {
-      if (!matchesIgnorePattern(entry.name, this.settings.ignoredPatterns)) localSnapshot.set(relPath, { name: entry.name, mtime: entry.mtime, size: entry.size });
+      if (!matchesIgnorePattern(entry.name, this.settings.ignoredPatterns)) localSnapshot.set(relPath, { name: entry.name, mtime: entry.mtime, size: entry.size, hash: entry.hash });
     }
     for (const [relPath, entry] of scanResult.created) {
-      if (!matchesIgnorePattern(entry.name, this.settings.ignoredPatterns)) localSnapshot.set(relPath, { name: entry.name, mtime: entry.mtime, size: entry.size });
+      if (!matchesIgnorePattern(entry.name, this.settings.ignoredPatterns)) localSnapshot.set(relPath, { name: entry.name, mtime: entry.mtime, size: entry.size, hash: entry.hash });
     }
 
     const remoteSnapshot = new Map<string, RemoteEntry>();

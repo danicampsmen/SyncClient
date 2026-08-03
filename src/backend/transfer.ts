@@ -4,6 +4,9 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { Logger } from './logger';
+
+const logger = new Logger('Transfer');
 
 export const RESUMABLE_UPLOAD_THRESHOLD = 5 * 1024 * 1024;
 export const RESUMABLE_UPLOAD_CHUNK_SIZE = 8 * 256 * 1024;
@@ -227,7 +230,16 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
   if (session) {
     try {
       const state = await queryUploadState(options, session, sleepFn);
-      session = { ...session, confirmed_offset: state.offset, updated_at: Date.now() };
+      session = {
+        operation_id: session.operation_id,
+        remote_id: session.remote_id,
+        session_uri: session.session_uri,
+        file_size: session.file_size,
+        confirmed_offset: state.offset,
+        chunk_size: session.chunk_size,
+        source_hash: session.source_hash,
+        updated_at: Date.now(),
+      };
       options.persistSession(session);
       if (state.completed) {
         options.deleteSession();
@@ -242,12 +254,17 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
       }
     }
   }
-  if (!session) await createSession();
+  if (!session) {
+    await createSession();
+    if (!session) {
+      throw new Error('Failed to create an upload session.');
+    }
+  }
 
   const file = await fs.open(options.filePath, 'r');
   try {
     while (session.confirmed_offset < options.fileSize) {
-      const offset = session.confirmed_offset;
+      const offset: number = session.confirmed_offset;
       const length = Math.min(chunkSize, options.fileSize - offset);
       const chunk = Buffer.allocUnsafe(length);
       const read = await file.read(chunk, 0, length, offset);
@@ -257,7 +274,16 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
 
       while (!advanced) {
         chunkAttempt++;
-        session = { ...session, confirmed_offset: offset, updated_at: Date.now() };
+        session = {
+          operation_id: session.operation_id,
+          remote_id: session.remote_id,
+          session_uri: session.session_uri,
+          file_size: session.file_size,
+          confirmed_offset: offset,
+          chunk_size: session.chunk_size,
+          source_hash: session.source_hash,
+          updated_at: Date.now(),
+        };
         options.persistSession(session);
         let response: Response;
         try {
@@ -281,7 +307,16 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
           if (error instanceof TransferHttpError && !transientStatus(error.status)) throw error;
           if (chunkAttempt >= TRANSFER_MAX_ATTEMPTS) throw error;
           const state = await queryUploadState(options, session, sleepFn);
-          session = { ...session, confirmed_offset: state.offset, updated_at: Date.now() };
+          session = {
+            operation_id: session.operation_id,
+            remote_id: session.remote_id,
+            session_uri: session.session_uri,
+            file_size: session.file_size,
+            confirmed_offset: state.offset,
+            chunk_size: session.chunk_size,
+            source_hash: session.source_hash,
+            updated_at: Date.now(),
+          };
           options.persistSession(session);
           if (state.completed) {
             options.deleteSession();
@@ -292,7 +327,16 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
           continue;
         }
         if (response.ok) {
-          session = { ...session, confirmed_offset: options.fileSize, updated_at: Date.now() };
+          session = {
+            operation_id: session.operation_id,
+            remote_id: session.remote_id,
+            session_uri: session.session_uri,
+            file_size: session.file_size,
+            confirmed_offset: options.fileSize,
+            chunk_size: session.chunk_size,
+            source_hash: session.source_hash,
+            updated_at: Date.now(),
+          };
           options.persistSession(session);
           options.deleteSession();
           return await responseJson(response);
@@ -302,14 +346,32 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
         }
         const serverOffset = response.status === 308 ? confirmedOffsetFromRange(response.headers) : null;
         if (serverOffset !== null && serverOffset > offset) {
-          session = { ...session, confirmed_offset: serverOffset, updated_at: Date.now() };
+          session = {
+            operation_id: session.operation_id,
+            remote_id: session.remote_id,
+            session_uri: session.session_uri,
+            file_size: session.file_size,
+            confirmed_offset: serverOffset,
+            chunk_size: session.chunk_size,
+            source_hash: session.source_hash,
+            updated_at: Date.now(),
+          };
           options.persistSession(session);
           advanced = true;
         } else if (chunkAttempt >= TRANSFER_MAX_ATTEMPTS) {
           throw new Error(`Resumable upload did not advance after ${chunkAttempt} attempts`);
         } else {
           const state = await queryUploadState(options, session, sleepFn);
-          session = { ...session, confirmed_offset: state.offset, updated_at: Date.now() };
+          session = {
+            operation_id: session.operation_id,
+            remote_id: session.remote_id,
+            session_uri: session.session_uri,
+            file_size: session.file_size,
+            confirmed_offset: state.offset,
+            chunk_size: session.chunk_size,
+            source_hash: session.source_hash,
+            updated_at: Date.now(),
+          };
           options.persistSession(session);
           if (state.completed) {
             options.deleteSession();
@@ -320,19 +382,24 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
         }
       }
     }
-  } finally {
-    await file.close();
-  }
-  throw new Error('Resumable upload completed without a final response');
-}
+   } finally {
+     await file.close();
+   }
+   if (session.confirmed_offset >= options.fileSize) {
+     return {};
+   }
+   throw new Error('Resumable upload completed without a final response');
+ }
 
 export async function downloadToAtomicFile(options: DownloadOptions): Promise<void> {
+  logger.info(`[Transfer] Iniciando descarga atómica para: ${options.destinationPath}`);
   await fs.mkdir(path.dirname(options.destinationPath), { recursive: true });
   let lastError: unknown;
   const sleepFn = options.sleep ?? sleep;
   for (let attempt = 1; attempt <= TRANSFER_MAX_ATTEMPTS; attempt++) {
     const temporaryPath = `${options.destinationPath}.syncclient-download-${Date.now()}-${randomUUID()}`;
     try {
+      logger.debug(`[Transfer] Attempt ${attempt}: Realizando petición a ${options.sourceUrl}`);
       const response = await requestTransfer(
         options.client,
         options.sourceUrl,
@@ -356,6 +423,7 @@ export async function downloadToAtomicFile(options: DownloadOptions): Promise<vo
       if (checksum && checksum.digest('hex') !== options.expectedMd5!.toLowerCase()) {
         throw new Error('Downloaded MD5 checksum mismatch');
       }
+      logger.info(`[Transfer] Descarga completada y verificada. Renombrando ${temporaryPath} a ${options.destinationPath}`);
       options.markSelfWritten(temporaryPath);
       await fs.rename(temporaryPath, options.destinationPath);
       if (options.modifiedTime) {
@@ -365,6 +433,7 @@ export async function downloadToAtomicFile(options: DownloadOptions): Promise<vo
       options.markSelfWritten(options.destinationPath);
       return;
     } catch (error) {
+      logger.error(`[Transfer] Error en el intento ${attempt} de descarga para ${options.destinationPath}`, error);
       lastError = error;
       await cleanupTemporaryFile(temporaryPath);
       if (attempt < TRANSFER_MAX_ATTEMPTS) await sleepFn(retryDelay(attempt));

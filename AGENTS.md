@@ -131,6 +131,16 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 - La selección de modelo debe hacerse explícitamente en la herramienta local;
   estas directivas no garantizan el cambio automático de proveedor en VS Code.
 
+### R16: Uso del Sistema de Logging Estructurado
+- Toda la salida de diagnóstico DEBE usar el `Logger` de `src/backend/logger.ts`.
+- NO usar `console.log`, `console.warn`, etc. directamente. El logger se encarga de eso.
+- Crear una instancia del logger por módulo: `const logger = new Logger('NombreDelModulo');`
+- Usar el nivel de severidad adecuado para cada mensaje:
+  - `logger.debug()`: Para información muy detallada, útil solo para depurar (ej. contenido de variables).
+  - `logger.info()`: Para eventos importantes del flujo normal (ej. "Sincronización iniciada", "Archivo descargado").
+  - `logger.warn()`: Para situaciones inesperadas que no detienen la operación (ej. "Reintentando descarga", "API de Drive lenta").
+  - `logger.error()`: Para errores que impiden que una operación específica se complete (ej. "Fallo al guardar en base de datos", "Permisos de archivo denegados").
+
 ---
 
 ## Estructura de Archivos Clave
@@ -144,7 +154,8 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 | `server.ts` | Servidor Express + API REST |
 | `src/auth.ts` | Firebase Auth + Google OAuth |
 | `src/drive.ts` | Cliente Google Drive API (web) |
-| `docs/PLAN_BISINCRONIZACION_UBUNTU.md` | Contrato de los motores Ubuntu y rclone |
+| `src/backend/logger.ts` | Sistema de logging estructurado (niveles, timestamps) |
+| `docs/AUDITORIA_COMPLETA.md` | Documento único con toda la auditoría y planificación |
 
 ## Glosario
 
@@ -163,16 +174,3 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 | `npm run electron:dev` | Electron + backend simultáneos |
 | `npm run android:deploy` | Build + desplegar a Android + ADB reverse |
 | `npm run lint` | Verificar tipos TypeScript |
-
-## Alcance de trabajo para Ubuntu
-
-La bisincronización de Ubuntu se planifica y valida en
-[`docs/PLAN_BISINCRONIZACION_UBUNTU.md`](docs/PLAN_BISINCRONIZACION_UBUNTU.md).
-Priorizar cambios en `src/backend/`, `src/shared/`, SQLite y la integración de
-Google Drive. No implementar Android dentro de una tarea Ubuntu salvo que se
-solicite explícitamente una modificación compartida.
-
-La sincronización Android se planifica y valida en
-[`docs/PLAN_SINCRONIZACION_ANDROID.md`](docs/PLAN_SINCRONIZACION_ANDROID.md).
-Priorizar `src/services/SyncEngine.ts`, `CapacitorFS`, sidecars `.syncmeta`,
-SQLite/WASM, ciclo de vida Android y relay autenticado.

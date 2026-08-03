@@ -35,9 +35,23 @@ let tokenExpiry: number = 0;
 let cachedRefreshToken: string | null = null;
 const TOKEN_REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // Renovar si faltan menos de 5 minutos
 
+const getEnv = () => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      return import.meta.env as Record<string, string | undefined>;
+    }
+  } catch {
+    // ignore
+  }
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env as Record<string, string | undefined>;
+  }
+  return {};
+};
+
+const env = getEnv();
 const GOOGLE_CLIENT_ID = (firebaseConfig as any).oAuthClientId as string;
-const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET
-  || import.meta.env.VITE_FIREBASE_CLIENT_SECRET;
+const GOOGLE_CLIENT_SECRET = env.VITE_GOOGLE_CLIENT_SECRET || env.VITE_FIREBASE_CLIENT_SECRET || '';
 
 if (!GOOGLE_CLIENT_SECRET) {
   console.warn('[Auth] VITE_GOOGLE_CLIENT_SECRET no está configurado. La re-autenticación puede fallar.');
@@ -66,6 +80,8 @@ async function saveTokens(accessToken: string, refreshToken: string | null, expi
   const expiry = Date.now() + (expiresIn - 300) * 1000; // 5 min de margen
   tokenExpiry = expiry;
   await SecureStore.set('gdrive_token_expiry', expiry.toString());
+  
+  console.log('[Auth] Tokens guardados. accessToken prefix:', accessToken.slice(0, 20) + '...');
 }
 
 async function clearTokens(): Promise<void> {
@@ -103,18 +119,18 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
   return base64URLEncode(new Uint8Array(hash));
 }
 
+let currentPKCEVerifier: string | null = null;
+
 function savePKCEState(state: string, verifier: string): void {
-  sessionStorage.setItem('pkce_state', state);
-  sessionStorage.setItem('pkce_verifier', verifier);
+  currentPKCEVerifier = verifier;
 }
 
 function getPKCEVerifier(state: string): string | null {
-  const savedState = sessionStorage.getItem('pkce_state');
-  const savedVerifier = sessionStorage.getItem('pkce_verifier');
-  sessionStorage.removeItem('pkce_state');
-  sessionStorage.removeItem('pkce_verifier');
-  if (savedState !== state) return null; // Prevención CSRF
-  return savedVerifier;
+  return currentPKCEVerifier;
+}
+
+function getPKCEVerifierFromCurrentFlow(): string | null {
+  return currentPKCEVerifier;
 }
 
 async function exchangeCodeForTokens(code: string, verifier: string, redirectUri: string): Promise<{ accessToken: string; refreshToken: string | null } | null> {
@@ -399,17 +415,39 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       const authUrl = await buildMobileOAuthUrl();
       await electronBridge.openExternal(authUrl);
 
-      const tokenOrCode = await pollBackendForToken();
-      if (!tokenOrCode) {
+      const codeOrToken = await pollBackendForToken();
+      if (!codeOrToken) {
         throw new Error('No se recibió token. ¿Cancelaste el inicio de sesión en el navegador?');
       }
 
-      const credential = GoogleAuthProvider.credential(null, tokenOrCode);
+      let googleAccessToken: string;
+      let googleRefreshToken: string | null = null;
+
+      // Si es un código de autorización, intercambiarlo por tokens de Google
+      if (codeOrToken.length < 100 || !codeOrToken.includes('.')) {
+        console.log('[Auth/Electron] Intercambiando authorization code por Google tokens...');
+        const verifier = getPKCEVerifierFromCurrentFlow();
+        if (!verifier) {
+          throw new Error('PKCE state lost. Intenta iniciar sesión de nuevo.');
+        }
+        const tokens = await exchangeCodeForTokens(codeOrToken, verifier, 'http://localhost:3000/api/oauth/callback');
+        if (!tokens?.accessToken) {
+          throw new Error('No se pudo obtener access token de Google.');
+        }
+        googleAccessToken = tokens.accessToken;
+        googleRefreshToken = tokens.refreshToken;
+      } else {
+        // Ya es un access token
+        googleAccessToken = codeOrToken;
+      }
+
+      // Crear credencial Firebase para mantener la sesión de Firebase activa
+      const credential = GoogleAuthProvider.credential(null, googleAccessToken);
       const firebaseResult = await signInWithCredential(auth, credential);
 
-      await saveTokens(tokenOrCode, cachedRefreshToken, 3600);
-      console.log('[Auth/Electron] Sesión iniciada con éxito.');
-      return { user: firebaseResult.user, accessToken: tokenOrCode };
+      await saveTokens(googleAccessToken, googleRefreshToken || cachedRefreshToken, 3600);
+      console.log('[Auth/Electron] Sesión iniciada con éxito. Google Access Token guardado.');
+      return { user: firebaseResult.user, accessToken: googleAccessToken };
     } finally {
       isElectronOAuthInProgress = false;
     }

@@ -5,6 +5,11 @@ import fs from "fs/promises";
 import fsSync from "fs";
 import crypto from "crypto";
 import { syncEngine } from "./src/backend/syncEngine";
+import { Logger } from "./src/backend/logger";
+
+const CONFIG_DIR = path.join(os.homedir(), ".config", "syncclient");
+const LOG_DIR = path.join(CONFIG_DIR, "logs");
+
 
 // --- Utilidades de validación de entrada (Fix 11) ---
 
@@ -120,6 +125,8 @@ function isValidSyncSettings(value: unknown): boolean {
 }
 
 async function startServer() {
+  Logger.initialize(LOG_DIR);
+
   const app = express();
   const PORT = 3000;
 
@@ -460,15 +467,19 @@ async function startServer() {
 
   app.delete("/api/sync/pair", async (req, res) => {
     try {
-      const pairId = req.query.id as string;
-      if (!isValidString(pairId, 256)) {
+      const { id } = req.body;
+      if (!isValidString(id, 256)) {
         return res.status(400).json({ error: "id inválido" });
       }
-      await syncEngine.removePair(pairId);
+      await syncEngine.removePair(id);
       res.json({ success: true, status: syncEngine.getStatus() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get("/diag/colors", (_req, res) => {
+    res.sendFile(path.join(process.cwd(), "color-diagnostic.html"));
   });
 
   app.post("/api/sync/resolve-conflict", async (req, res) => {
@@ -742,11 +753,12 @@ async function startServer() {
     httpServer.close(async () => {
       console.log('[Info] Servidor HTTP cerrado.');
       try {
-        await syncEngine.shutdown(); // Suponiendo que syncEngine tiene un método shutdown
+        await syncEngine.shutdown();
         console.log('[Info] Motor de sincronización detenido.');
       } catch (error) {
         console.error('[Error] Error al detener el motor de sincronización:', error);
       }
+      Logger.close();
       process.exit(0);
     });
   };

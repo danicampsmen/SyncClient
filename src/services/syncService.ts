@@ -1,22 +1,44 @@
 import { Capacitor } from '@capacitor/core';
-import { SyncEngine } from './SyncEngine';
-import { CapacitorFS } from '../utils/fileSystem';
 import { SyncPair, SyncSettings } from '../types';
 import { backendFetch } from './backendSession';
 
+let SyncEngine: any = null;
+let CapacitorFS: any = null;
+
+async function loadNativeEngine() {
+  if (!SyncEngine && Capacitor.isNativePlatform()) {
+    const mod = await import('./SyncEngine');
+    SyncEngine = mod.SyncEngine;
+    const fsMod = await import('../utils/fileSystem');
+    CapacitorFS = fsMod.CapacitorFS;
+  }
+  return SyncEngine;
+}
+
 class SyncService {
-  private localEngine: SyncEngine | null = null;
+  private localEngine: any = null;
   private isNative = Capacitor.isNativePlatform();
 
   constructor() {
     if (this.isNative) {
-      console.log('[SyncService] Initializing Native Engine for Android');
-      this.localEngine = new SyncEngine(new CapacitorFS());
+      console.log('[SyncService] Native engine requested; will be loaded lazily on first use.');
+    }
+  }
+
+  private async ensureNativeEngine() {
+    if (!this.isNative) return;
+    if (!this.localEngine) {
+      const Engine = await loadNativeEngine();
+      if (!this.localEngine) {
+        this.localEngine = new Engine(new CapacitorFS());
+      }
     }
   }
 
   public async setToken(token: string | null) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
+      await this.ensureNativeEngine();
       this.localEngine?.setToken(token);
     } else {
       await backendFetch('/api/sync/token', {
@@ -29,6 +51,7 @@ class SyncService {
 
   public async getStatus() {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       return this.localEngine?.getStatus();
     } else {
       const res = await backendFetch('/api/sync/status');
@@ -39,6 +62,7 @@ class SyncService {
 
   public async setPairs(pairs: SyncPair[]) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       await this.localEngine?.setPairs(pairs);
     } else {
       await backendFetch('/api/sync/pairs', {
@@ -51,6 +75,7 @@ class SyncService {
 
   public async toggleSync(pairId: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       await this.localEngine?.togglePairSync(pairId);
     } else {
       await backendFetch('/api/sync/toggle', {
@@ -63,6 +88,7 @@ class SyncService {
 
   public async forceSync(pairId: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       await this.localEngine?.forceSync(pairId);
     } else {
       await backendFetch('/api/sync/force', {
@@ -75,6 +101,7 @@ class SyncService {
 
   public async cleanDuplicates(pairId: string): Promise<{ localDeleted: number; localRenamed: number; remoteDeleted: number; remoteRenamed: number } | null> {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       return (await this.localEngine?.cleanDuplicates(pairId)) || null;
     } else {
       try {
@@ -96,6 +123,7 @@ class SyncService {
 
   public async pauseSync(pairId: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       await this.localEngine?.pausePair(pairId);
     } else {
       await backendFetch('/api/sync/pause', {
@@ -108,6 +136,7 @@ class SyncService {
 
   public async removePair(id: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       await this.localEngine?.removePair(id);
     } else {
       await backendFetch(`/api/sync/pair?id=${encodeURIComponent(id)}`, {
@@ -118,6 +147,7 @@ class SyncService {
 
   public async updateSettings(settings: SyncSettings) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       await this.localEngine?.updateSettings(settings);
     } else {
       await backendFetch('/api/sync/settings', {
@@ -130,6 +160,7 @@ class SyncService {
 
   public async dismissAlert(drivePath: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       console.warn('[SyncService] dismissAlert no implementado en nativo');
     } else {
       await backendFetch('/api/sync/dismiss-alert', {
@@ -142,6 +173,7 @@ class SyncService {
 
   public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename') {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       // Fix #5: Implementar resolución de conflictos en nativo
       const conflict = this.localEngine?.getStatus().pendingConflicts?.find((c: any) => c.id === conflictId);
       if (!conflict) {
@@ -168,6 +200,7 @@ class SyncService {
 
   public async dehydrate(pairId: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       // Fix #5: Delegar al backend del PC para deshidratar (liberar espacio)
       console.log('[SyncService] Delegando dehydrate al PC...');
       return await backendFetch('/api/sync/dehydrate', {
@@ -189,6 +222,7 @@ class SyncService {
 
   public async hydrate(pairId: string) {
     if (this.isNative) {
+      await this.ensureNativeEngine();
       // Fix #5: Delegar al backend del PC para hidratar (descargar offline)
       console.log('[SyncService] Delegando hydrate al PC...');
       return await backendFetch('/api/sync/hydrate', {

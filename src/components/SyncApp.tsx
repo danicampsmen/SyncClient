@@ -27,7 +27,8 @@ export default function SyncApp() {
   const [settings, setSettings] = useState<SyncSettings>({
     maxDownloadSpeed: 0,
     maxUploadSpeed: 0,
-    conflictResolution: 'prompt'
+    conflictResolution: 'prompt',
+    ignoredPatterns: [],
   });
   const [needsAuth, setNeedsAuth] = useState(true);
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -58,7 +59,7 @@ export default function SyncApp() {
   pairsRef.current = pairs;
 
   useEffect(() => {
-    let timerId: any = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
     let isCancelled = false;
 
     const poll = async () => {
@@ -128,10 +129,10 @@ export default function SyncApp() {
         await syncService.setToken(result.accessToken);
         fetchBackendStatus();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Login failed:', err);
       // Mostrar error descriptivo al usuario
-      const msg = err?.message || err?.toString() || 'Error desconocido al iniciar sesión';
+      const msg = (err instanceof Error ? err.message : String(err)) || 'Error desconocido al iniciar sesión';
       // Simplificar errores comunes de OAuth
       if (msg.includes('redirect_uri_mismatch')) {
         setLoginError('Error de configuración: La URI de redirección no está registrada en Google Cloud Console. Contacta al desarrollador.');
@@ -776,7 +777,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
     try {
       await syncService.dehydrate(pairId);
       forceSync(pairId);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Error al deshidratar par:', e);
     }
   };
@@ -785,7 +786,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair }: {
     try {
       await syncService.hydrate(pairId);
       forceSync(pairId);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Error al hidratar par:', e);
     }
   };
@@ -1000,8 +1001,8 @@ function GoogleDriveFolderModal({ isOpen, onClose, onSelect }: { isOpen: boolean
     try {
       const res = await listFolders(folderId);
       setFolders(res);
-    } catch (err: any) {
-      setError(err.message || 'Error cargando carpetas de Google Drive');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error cargando carpetas de Google Drive');
     } finally {
       setLoading(false);
     }
@@ -1238,8 +1239,8 @@ function LocalFolderModal({
     try {
       const list = await VFSBridge.listLocalDirectories(path);
       setFolders(list);
-    } catch (e: any) {
-      setError(e.message || 'No se pudo acceder al directorio');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo acceder al directorio');
     } finally {
       setLoading(false);
     }

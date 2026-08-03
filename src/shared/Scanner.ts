@@ -4,6 +4,10 @@
  */
 
 import { FileState } from './schema';
+import { IFileSystem } from '../utils/fileSystem';
+import { Logger } from '../backend/logger';
+
+const logger = new Logger('Scanner');
 
 const BLOCK_SIZE = 4 * 1024 * 1024; // 4MB
 
@@ -13,6 +17,7 @@ export interface LocalEntry {
     mtime: number;
     size: number;
     isDirectory: boolean;
+    hash?: string;
 }
 
 export interface ScanResult {
@@ -36,39 +41,39 @@ export async function computeBlockHashes(
         return [];
     }
     // Desktop: streaming con crypto
-    try {
-        const fs = await import('fs');
-        const crypto = await import('crypto');
-        const hashes: string[] = [];
-        let currentHash = crypto.createHash('sha256');
-        let currentSize = 0;
+try {
+         const fs = await import('fs');
+         const crypto = await import('crypto');
+         const hashes: string[] = [];
+         let currentHash = crypto.createHash('sha256');
+         let currentSize = 0;
 
-        return new Promise((resolve, reject) => {
-            const stream = fs.createReadStream(_filePath, { highWaterMark: 1024 * 1024 });
-            stream.on('data', (chunk: any) => {
-                let offset = 0;
-                while (offset < chunk.length) {
-                    const remaining = BLOCK_SIZE - currentSize;
-                    const toHash = chunk.slice(offset, offset + remaining);
-                    currentHash.update(toHash);
-                    currentSize += toHash.length;
-                    offset += toHash.length;
-                    if (currentSize >= BLOCK_SIZE) {
-                        hashes.push(currentHash.digest('hex'));
-                        currentHash = crypto.createHash('sha256');
-                        currentSize = 0;
-                    }
-                }
-            });
-            stream.on('end', () => {
-                if (currentSize > 0) hashes.push(currentHash.digest('hex'));
-                resolve(hashes);
-            });
-            stream.on('error', reject);
-        });
-    } catch {
-        return [];
-    }
+         return new Promise((resolve, reject) => {
+             const stream = fs.createReadStream(_filePath, { highWaterMark: 1024 * 1024 });
+             stream.on('data', (chunk) => {
+                 let offset = 0;
+                 while (offset < chunk.length) {
+                     const remaining = BLOCK_SIZE - currentSize;
+                     const toHash = chunk.slice(offset, offset + remaining);
+                     currentHash.update(toHash);
+                     currentSize += toHash.length;
+                     offset += toHash.length;
+                     if (currentSize >= BLOCK_SIZE) {
+                         hashes.push(currentHash.digest('hex'));
+                         currentHash = crypto.createHash('sha256');
+                         currentSize = 0;
+                     }
+                 }
+             });
+             stream.on('end', () => {
+                 if (currentSize > 0) hashes.push(currentHash.digest('hex'));
+                 resolve(hashes);
+             });
+             stream.on('error', reject);
+         });
+     } catch (error) {
+         throw error;
+     }
 }
 
 /** Comparar hashes por bloques: ¿cambió el contenido real? */
@@ -103,7 +108,7 @@ export function isMtimeChanged(localMs: number, dbMs: number): boolean {
  * Previene que readdir[] vacío por falta de permisos en Android
  * se confunda con "carpeta vacía" y borre todas las entradas de la DB.
  */
-export async function verifyReadWriteAccess(dir: string, fs: any): Promise<boolean> {
+export async function verifyReadWriteAccess(dir: string, fs: IFileSystem): Promise<boolean> {
     const testFile = `${dir}/.syncclient_permcheck`;
     try {
         await fs.writeFile(testFile, Date.now().toString());
@@ -127,7 +132,7 @@ export async function verifyReadWriteAccess(dir: string, fs: any): Promise<boole
 export async function scanChanges(
     dir: string,
     dbState: ReadonlyMap<string, FileState>,
-    fs: any,
+    fs: IFileSystem,
     pairId: string
 ): Promise<ScanResult | 'PERMISSION_DENIED'> {
     // Recopilar entradas del filesystem de forma compatible con Node.js y Capacitor
@@ -141,74 +146,31 @@ export async function scanChanges(
     let entries: ScanEntry[] = [];
 
     try {
-        // Intentar con withFileTypes (Node.js) — devuelve Dirent[]
-        let raw: any[];
-        try {
-            raw = await fs.readdir(dir, { withFileTypes: true });
-        } catch {
-            // Fallback: readdir sin opciones (devuelve string[] en Node.js o objetos en Capacitor)
-            raw = await fs.readdir(dir);
-        }
+        const raw = await fs.readdir(dir);
 
         if (!Array.isArray(raw)) {
             entries = [];
         } else {
-            // Normalizar entradas a formato común
             for (const item of raw) {
-                if (typeof item === 'string') {
-                    // Node.js readdir sin withFileTypes: string[]
-                    try {
-                        const fullPath = `${dir}/${item}`;
-                        const stat = await fs.stat(fullPath);
-                        entries.push({
-                            name: item,
-                            isDirectory: stat.isDirectory(),
-                            size: stat.size || 0,
-                            mtime: stat.mtimeMs || stat.mtime?.getTime?.() || 0
-                        });
-                    } catch {
-                        // No se pudo hacer stat — ignorar
-                    }
-                } else if (item && typeof item === 'object') {
-                    // Dirent (Node.js con withFileTypes) o entrada de Capacitor
-                    const name = item.name;
-                    if (!name) continue;
-
-                    // Si ya tiene size y mtime (Capacitor), usarlos directamente
-                    if (item.size !== undefined && item.mtime !== undefined) {
-                        entries.push({
-                            name,
-                            isDirectory: item.isDirectory === true || (typeof item.isDirectory === 'function' && item.isDirectory()),
-                            size: item.size || 0,
-                            mtime: item.mtime || 0
-                        });
-                    } else {
-                        // Dirent de Node.js: necesita stat para size/mtime
-                        try {
-                            const fullPath = `${dir}/${name}`;
-                            const stat = await fs.stat(fullPath);
-                            entries.push({
-                                name,
-                                isDirectory: typeof item.isDirectory === 'function' ? item.isDirectory() : item.isDirectory === true,
-                                size: stat.size || 0,
-                                mtime: stat.mtimeMs || 0
-                            });
-                        } catch {
-                            // No se pudo hacer stat — ignorar
-                        }
-                    }
-                }
+                if (!item.name) continue;
+                entries.push({
+                    name: item.name,
+                    isDirectory: item.isDirectory,
+                    size: item.size || 0,
+                    mtime: item.mtime || 0,
+                });
             }
         }
     } catch {
         entries = [];
     }
 
-    // Permission Gate: si no hay entradas pero la DB tenía archivos, verificar acceso
+    // Permission Gate: si no hay entradas pero la DB tenía archivos, verificar acceso real
+    // Solo se considera PERMISSION_DENIED si el directorio no es accesible, no si simplemente está vacío.
     if (entries.length === 0 && dbState.size > 0) {
         const hasAccess = await verifyReadWriteAccess(dir, fs);
         if (!hasAccess) {
-            console.error(`[Scanner] PERMISSION_DENIED in ${dir}`);
+            logger.error(`[Scanner] PERMISSION_DENIED in ${dir}`);
             return 'PERMISSION_DENIED';
         }
     }
@@ -250,6 +212,17 @@ export async function scanChanges(
 
         // Potencialmente modificado — marcar para block hashing (lazy)
         changed.set(normName, localEntry);
+    }
+
+    // Calcular hashes de bloques para archivos potencialmente modificados
+    if (changed.size > 0) {
+        const hashes = await lazyHashBatch(changed, 2, 5);
+        for (const [relPath, hash] of hashes) {
+            const entry = changed.get(relPath);
+            if (entry) {
+                entry.hash = hash.length > 0 ? hash[0] : undefined;
+            }
+        }
     }
 
     // Detectar archivos borrados (en DB pero no en filesystem)

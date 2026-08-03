@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SyncClient Color Diagnostic</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            neutral: {
+              50: '#fafafa',
+              100: '#f5f5f5',
+              200: '#e5e5e5',
+              300: '#d4d4d4',
+              400: '#a3a3a3',
+              500: '#737373',
+              600: '#525252',
+              700: '#404040',
+              800: '#262626',
+              900: '#171717',
+              950: '#0a0a0a',
+            },
+            blue: {
+              500: '#3b82f6',
+              400: '#60a5fa',
+              600: '#2563eb',
+            },
+            emerald: {
+              500: '#10b981',
+              400: '#34d399',
+            },
+            amber: {
+              500: '#f59e0b',
+              400: '#fbbf24',
+              600: '#d97706',
+            },
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-neutral-950 text-neutral-100 p-8 space-y-6">
+  <h1 class="text-2xl font-bold mb-4">Diagnóstico de colores SyncClient</h1>
+
+  <section>
+    <h2 class="text-xl font-semibold mb-2">Palette neutral</h2>
+    <div class="grid grid-cols-2 gap-2">
+      <div class="bg-neutral-50 text-black p-2">neutral-50</div>
+      <div class="bg-neutral-100 text-black p-2">neutral-100</div>
+      <div class="bg-neutral-200 text-black p-2">neutral-200</div>
+      <div class="bg-neutral-300 text-black p-2">neutral-300</div>
+      <div class="bg-neutral-400 text-black p-2">neutral-400</div>
+      <div class="bg-neutral-500 text-white p-2">neutral-500</div>
+      <div class="bg-neutral-600 text-white p-2">neutral-600</div>
+      <div class="bg-neutral-700 text-white p-2">neutral-700</div>
+      <div class="bg-neutral-800 text-white p-2">neutral-800</div>
+      <div class="bg-neutral-900 text-white p-2">neutral-900</div>
+      <div class="bg-neutral-950 text-white p-2">neutral-950</div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-xl font-semibold mb-2">Clases usadas en SyncApp</h2>
+    <div class="space-y-2">
+      <div class="bg-neutral-900 text-neutral-100 p-3 rounded">bg-neutral-900 / text-neutral-100</div>
+      <div class="bg-neutral-900 text-neutral-200 p-3 rounded">bg-neutral-900 / text-neutral-200</div>
+      <div class="bg-neutral-900 text-neutral-300 p-3 rounded">bg-neutral-900 / text-neutral-300</div>
+      <div class="bg-neutral-900 text-neutral-400 p-3 rounded">bg-neutral-900 / text-neutral-400</div>
+      <div class="bg-neutral-900 text-neutral-500 p-3 rounded">bg-neutral-900 / text-neutral-500</div>
+      <div class="bg-neutral-800 text-neutral-200 p-3 rounded">bg-neutral-800 / text-neutral-200</div>
+      <div class="bg-neutral-800 text-neutral-300 p-3 rounded">bg-neutral-800 / text-neutral-300</div>
+      <div class="bg-neutral-950 text-neutral-100 p-3 rounded">bg-neutral-950 / text-neutral-100</div>
+      <div class="bg-blue-500/10 text-blue-400 p-3 rounded border border-blue-500/20">bg-blue-500/10 / text-blue-400</div>
+      <div class="bg-emerald-500/10 text-emerald-400 p-3 rounded border border-emerald-500/20">bg-emerald-500/10 / text-emerald-400</div>
+      <div class="bg-amber-500/10 text-amber-400 p-3 rounded border border-amber-500/20">bg-amber-500/10 / text-amber-400</div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-xl font-semibold mb-2">Botones / controles</h2>
+    <div class="flex flex-wrap gap-2">
+      <button class="bg-blue-500 text-white px-3 py-1.5 rounded text-sm">Primario</button>
+      <button class="bg-neutral-800 text-neutral-200 px-3 py-1.5 rounded text-sm">Neutral</button>
+      <button class="bg-neutral-800 text-neutral-400 px-3 py-1.5 rounded text-sm">Secundario</button>
+      <button class="bg-neutral-700 text-white px-3 py-1.5 rounded text-sm">Hover</button>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-xl font-semibold mb-2">Bordes</h2>
+    <div class="space-y-2">
+      <div class="border border-neutral-700 p-2 rounded">border-neutral-700</div>
+      <div class="border border-neutral-800 p-2 rounded">border-neutral-800</div>
+      <div class="border border-blue-500 p-2 rounded">border-blue-500</div>
+      <div class="border border-emerald-500/30 p-2 rounded">border-emerald-500/30</div>
+    </div>
+  </section>
+</body>
+</html>

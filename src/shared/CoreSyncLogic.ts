@@ -18,7 +18,6 @@ export interface FileGroupItem {
   name: string;
   mtime: number;
   version?: number;
-  [key: string]: any;
 }
 
 // --- Constantes centralizadas de rutas (evitan hardcoded paths dispersos) ---
