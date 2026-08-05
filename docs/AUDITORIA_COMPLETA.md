@@ -1,3 +1,32 @@
+# Auditoría Completa V10 — SyncClient V1 (Usuario: revisión puntual)
+**(Análisis puntual de problemas críticos reportados por el equipo — integrar en roadmap de fixes)**
+**Fecha de revisión:** 5 de Agosto de 2026 — Auditoría V10
+**Autor:** Auditoría generada a partir del reporte del equipo (entrada manual)
+**Método:** Revisión dirigida de los puntos señalados por el equipo sobre `src/backend/syncEngine.ts`, `src/services/SyncEngine.ts`, `src/shared/` y `auth.ts`. Se priorizan correcciones críticas de integridad y arquitectura.
+
+## 🔴 Hallazgos Críticos Reportados (Resumido)
+
+El análisis puntual recibido identifica los siguientes problemas críticos que deben atenderse inmediatamente:
+
+1. Invocación incorrecta en resolución de conflictos (`resolveConflict`) — se pasaba una ruta remota (`pair.remotePath`) donde la API espera una ID de carpeta remota. Impacto: HTTP 400/404 durante "Usar Local" en resolución de conflictos.
+2. Desajuste de variables de entorno para la renovación del token backend — el backend usaba `process.env.GOOGLE_CLIENT_ID` en lugar de preferir `VITE_*` variables del entorno, provocando `invalid_client` en refresh token.
+3. Falta de candado de proceso (`PairLock`) en `fastSync` — ejecución concurrente con `runSync` puede generar `SQLITE_BUSY` y corrupción de vector clocks.
+4. Bucle N+1 en Android que provoca HTTP 429 (`reconcileWithHttp304`) — peticiones por archivo en vez de comparación en memoria o batched requests.
+5. Ausencia del borrado directorial en cascada en el motor Android — eliminaciones locales no propagan correctamente y generan estados huérfanos.
+6. Caché huérfana de carpeta raíz (`pairRootRemoteFolderId`) — mapa en memoria no limpiado al eliminar/editar pares.
+7. Objeto `pair.progress` nulo durante `fastSync` — UI no muestra progreso en sincronizaciones rápidas.
+
+## 📋 Resumen de Acciones Recomendadas (prioridad inmediata)
+
+- En `src/backend/syncEngine.ts` (`resolveConflict`): asegurar que se pasa la remote folder ID — usar `await this.getPairRemoteFolderId(pair)` o `parentState.remote_id` cuando esté disponible.
+- En `src/backend/syncEngine.ts`: leer variables de entorno en orden preferente: `process.env.VITE_FIREBASE_OAUTH_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID` (y lo equivalente para el secret).
+- En `src/backend/syncEngine.ts` (`fastSync`): envolver la ejecución con `acquirePairLock(...)` para evitar concurrencia con `runSync`.
+- En `src/services/SyncEngine.ts` (Android): eliminar el bucle N+1 y portar la lógica de borrado en cascada (`deleteFolderStateCascade`) desde el backend Desktop.
+- Limpiar `pairRootRemoteFolderId` cuando un par sea eliminado o su remotePath cambie.
+- Inicializar `pair.progress` al entrar en `fastSync` para que la UI reciba un estado de progreso.
+
+---
+
 # Auditoría Completa V9 — SyncClient V1
 **(Revisión Exhaustiva Post-Fixes + Verificación de Estado Actual)**
 **Fecha de revisión:** 5 de Agosto de 2026 — Auditoría V9
