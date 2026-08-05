@@ -2,9 +2,40 @@ import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { Readable, Transform } from 'node:stream';
+import { Readable, Transform, TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Logger } from './logger';
+
+// FASE 3: Limitador de ancho de banda basado en Streams
+export class ThrottleTransform extends Transform {
+  private bytesPassed = 0;
+  private startTime = Date.now();
+
+  constructor(private maxBytesPerSecond: number) {
+    super();
+  }
+
+  _transform(chunk: any, encoding: BufferEncoding, callback: TransformCallback) {
+    if (this.maxBytesPerSecond <= 0) {
+      this.push(chunk);
+      return callback();
+    }
+
+    this.bytesPassed += chunk.length;
+    const elapsed = Date.now() - this.startTime;
+    const expectedTime = (this.bytesPassed / this.maxBytesPerSecond) * 1000;
+
+    if (expectedTime > elapsed) {
+      setTimeout(() => {
+        this.push(chunk);
+        callback();
+      }, expectedTime - elapsed);
+    } else {
+      this.push(chunk);
+      callback();
+    }
+  }
+}
 
 const logger = new Logger('Transfer');
 
@@ -41,6 +72,8 @@ export interface ResumableUploadOptions {
   deleteSession: () => void;
   chunkSize?: number;
   sourceHash?: string;
+  maxUploadSpeed?: number;
+  onProgress?: (loaded: number, total?: number) => void;
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
@@ -52,6 +85,8 @@ export interface DownloadOptions {
   expectedSize?: number;
   client: TransferHttpClient;
   markSelfWritten: (filePath: string) => void;
+  maxDownloadSpeed?: number;
+  onProgress?: (loaded: number, total?: number) => void;
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
@@ -59,6 +94,13 @@ export class TransferHttpError extends Error {
   constructor(readonly status: number, message = `Transfer request failed (${status})`) {
     super(message);
     this.name = 'TransferHttpError';
+  }
+}
+
+export class FileNotFoundError extends TransferHttpError {
+  constructor(message = 'Remote file not found (404)') {
+    super(404, message);
+    this.name = 'FileNotFoundError';
   }
 }
 
@@ -104,15 +146,35 @@ export async function requestTransfer(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const response = await client.request(url, withAuthorization(initFactory(), client.getAccessToken()));
-      if (response.status === 401 && !refreshed) {
+      
+      let isRateLimit = response.status === 429;
+      let isAuthError = response.status === 401;
+      
+      if (response.status === 403) {
+        try {
+          const clone = response.clone();
+          const errJson = await clone.json();
+          const reason = errJson?.error?.errors?.[0]?.reason;
+          if (reason === 'userRateLimitExceeded' || reason === 'rateLimitExceeded') {
+            isRateLimit = true;
+          } else {
+            isAuthError = true;
+          }
+        } catch (e) {
+          isAuthError = true;
+        }
+      }
+
+      if (isAuthError && !refreshed) {
         refreshed = true;
         if (await client.refreshAccessToken()) {
           attempt--;
           continue;
         }
-        throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
+        if (response.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
       }
-      if (!transientStatus(response.status) || attempt === maxAttempts) return response;
+
+      if (!(transientStatus(response.status) || isRateLimit) || attempt === maxAttempts) return response;
       await response.body?.cancel();
       await sleepFn(retryAfterMs(response.headers.get('retry-after')) ?? retryDelay(attempt));
     } catch (error) {
@@ -261,6 +323,10 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
     }
   }
 
+  const maxBytesPerSecond = options.maxUploadSpeed ? options.maxUploadSpeed * 1024 : 0;
+  let uploadedBytesInSession = 0;
+  const uploadStartTime = Date.now();
+
   const file = await fs.open(options.filePath, 'r');
   try {
     while (session.confirmed_offset < options.fileSize) {
@@ -269,6 +335,16 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
       const chunk = Buffer.allocUnsafe(length);
       const read = await file.read(chunk, 0, length, offset);
       if (read.bytesRead !== length) throw new Error(`Local file changed while uploading at offset ${offset}`);
+
+      // FASE 3: Límite de subida de chunks
+      if (maxBytesPerSecond > 0) {
+        uploadedBytesInSession += length;
+        const elapsed = Date.now() - uploadStartTime;
+        const expectedTime = (uploadedBytesInSession / maxBytesPerSecond) * 1000;
+        if (expectedTime > elapsed) {
+          await sleepFn(expectedTime - elapsed);
+        }
+      }
       let chunkAttempt = 0;
       let advanced = false;
 
@@ -320,9 +396,13 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
           options.persistSession(session);
           if (state.completed) {
             options.deleteSession();
+            options.onProgress?.(options.fileSize, options.fileSize);
             return state.completed;
           }
-          if (state.offset > offset) advanced = true;
+          if (state.offset > offset) {
+            advanced = true;
+            options.onProgress?.(state.offset, options.fileSize);
+          }
           await sleepFn(retryDelay(chunkAttempt));
           continue;
         }
@@ -339,6 +419,7 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
           };
           options.persistSession(session);
           options.deleteSession();
+          options.onProgress?.(options.fileSize, options.fileSize);
           return await responseJson(response);
         }
         if (response.status !== 308 && !transientStatus(response.status)) {
@@ -358,6 +439,7 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
           };
           options.persistSession(session);
           advanced = true;
+          options.onProgress?.(serverOffset, options.fileSize);
         } else if (chunkAttempt >= TRANSFER_MAX_ATTEMPTS) {
           throw new Error(`Resumable upload did not advance after ${chunkAttempt} attempts`);
         } else {
@@ -375,21 +457,26 @@ export async function uploadResumableFile(options: ResumableUploadOptions): Prom
           options.persistSession(session);
           if (state.completed) {
             options.deleteSession();
+            options.onProgress?.(options.fileSize, options.fileSize);
             return state.completed;
           }
-          if (state.offset > offset) advanced = true;
+          if (state.offset > offset) {
+            advanced = true;
+            options.onProgress?.(state.offset, options.fileSize);
+          }
           await sleepFn(retryDelay(chunkAttempt));
         }
       }
     }
-   } finally {
-     await file.close();
-   }
-   if (session.confirmed_offset >= options.fileSize) {
-     return {};
-   }
-   throw new Error('Resumable upload completed without a final response');
- }
+  } finally {
+    await file.close();
+  }
+  if (session.confirmed_offset >= options.fileSize) {
+    options.onProgress?.(options.fileSize, options.fileSize);
+    return {};
+  }
+  throw new Error('Resumable upload completed without a final response');
+}
 
 export async function downloadToAtomicFile(options: DownloadOptions): Promise<void> {
   logger.info(`[Transfer] Iniciando descarga atómica para: ${options.destinationPath}`);
@@ -407,35 +494,64 @@ export async function downloadToAtomicFile(options: DownloadOptions): Promise<vo
         1,
         sleepFn,
       );
-      if (!response.ok || !response.body) throw new TransferHttpError(response.status);
-      const checksum = options.expectedMd5 ? createHash('md5') : null;
-      const hasher = new Transform({
+      if (!response.ok || !response.body) {
+        if (response.status === 404) throw new FileNotFoundError(`Remote file not found (404): ${options.sourceUrl}`);
+        let errorMessage = `Transfer request failed (${response.status})`;
+        try {
+          const errorJson = await response.json();
+          if (errorJson?.error?.message) {
+            errorMessage += `: ${errorJson.error.message}`;
+          }
+        } catch (e) {}
+        throw new TransferHttpError(response.status, errorMessage);
+      }
+      const hasher = options.expectedMd5 ? createHash('md5') : null;
+      const hasherTransform = hasher ? new Transform({
         transform(chunk: Buffer, _encoding, callback) {
-          if (checksum) checksum.update(chunk);
+          hasher.update(chunk);
+          callback(null, chunk);
+        },
+      }) : null;
+
+      let loadedBytes = 0;
+      const progressTransform = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          loadedBytes += chunk.length;
+          options.onProgress?.(loadedBytes, options.expectedSize);
           callback(null, chunk);
         },
       });
-      await pipeline(Readable.fromWeb(response.body as any), hasher, fsSync.createWriteStream(temporaryPath, { flags: 'wx' }));
+
+      // Usar any[] y castear la función para satisfacer a TypeScript
+      const streams: any[] = [Readable.fromWeb(response.body as any)];
+      if (options.maxDownloadSpeed && options.maxDownloadSpeed > 0) {
+        streams.push(new ThrottleTransform(options.maxDownloadSpeed));
+      }
+      streams.push(progressTransform);
+      if (hasherTransform) streams.push(hasherTransform);
+      streams.push(fsSync.createWriteStream(temporaryPath, { flags: 'wx' }));
+      await (pipeline as Function)(...streams);
       const stats = await fs.stat(temporaryPath);
       if (options.expectedSize !== undefined && stats.size !== options.expectedSize) {
         throw new Error(`Downloaded size mismatch: expected ${options.expectedSize}, got ${stats.size}`);
       }
-      if (checksum && checksum.digest('hex') !== options.expectedMd5!.toLowerCase()) {
+      if (hasher && hasher.digest('hex') !== options.expectedMd5!.toLowerCase()) {
         throw new Error('Downloaded MD5 checksum mismatch');
       }
       logger.info(`[Transfer] Descarga completada y verificada. Renombrando ${temporaryPath} a ${options.destinationPath}`);
       options.markSelfWritten(temporaryPath);
+      options.markSelfWritten(options.destinationPath);
       await fs.rename(temporaryPath, options.destinationPath);
       if (options.modifiedTime) {
         const mtime = new Date(options.modifiedTime);
         await fs.utimes(options.destinationPath, mtime, mtime);
       }
-      options.markSelfWritten(options.destinationPath);
       return;
     } catch (error) {
       logger.error(`[Transfer] Error en el intento ${attempt} de descarga para ${options.destinationPath}`, error);
       lastError = error;
       await cleanupTemporaryFile(temporaryPath);
+      if (error instanceof FileNotFoundError) throw error;
       if (attempt < TRANSFER_MAX_ATTEMPTS) await sleepFn(retryDelay(attempt));
     }
   }

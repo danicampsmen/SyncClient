@@ -61,12 +61,20 @@ export class NodeFileSystem implements IFileSystem {
   async readdir(p: string): Promise<FileEntry[]> {
     try {
       const dirents = await fs.readdir(p, { withFileTypes: true });
-      return dirents.map(d => ({
-        name: d.name,
-        isDirectory: d.isDirectory(),
-        size: 0,
-        mtime: 0,
+      const results = await Promise.all(dirents.map(async d => {
+        try {
+          const st = await fs.stat(path.join(p, d.name));
+          return {
+            name: d.name,
+            isDirectory: d.isDirectory(),
+            size: st.size,
+            mtime: st.mtimeMs,
+          };
+        } catch {
+          return null;
+        }
       }));
+      return results.filter(r => r !== null) as FileEntry[];
     } catch {
       return [];
     }

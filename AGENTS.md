@@ -17,7 +17,7 @@ SyncClient reemplaza al cliente oficial de Google Drive de Windows para **Linux 
 ### R1: Precisión Técnica con Fuentes Oficiales
 - Google Drive API: https://developers.google.com/drive/api/reference/rest/v3
 - Google OAuth: https://developers.google.com/identity/protocols/oauth2
-- Chokidar: https://github.com/paulmillr/chokidar
+- @parcel/watcher: https://github.com/parcel-bundler/watcher
 - Firebase Auth: https://firebase.google.com/docs/auth
 - **NUNCA inventar endpoints, parámetros o comportamientos de API.**
 

@@ -73,6 +73,7 @@ export interface SyncEvent {
   timestamp: number;
   webViewLink?: string;
   details?: string;
+  size?: number; // Tamaño del archivo en bytes
 }
 
 export interface PendingConflict {

@@ -1,4 +1,5 @@
 import { getAccessToken, refreshAccessToken, logout } from './auth';
+import { Logger } from './shared/browserLogger';
 
 export interface DriveFile {
   id: string;
@@ -7,6 +8,8 @@ export interface DriveFile {
   modifiedTime: string;
   size?: string;
 }
+
+const logger = new Logger('Drive');
 
 // R5: Exponential backoff para 429/5xx (1s → 2s → 4s → 8s → máx 32s)
 const RETRY_BACKOFF_BASE_MS = 1000;
@@ -29,7 +32,7 @@ async function sleepWithRetry(res: Response, retryFactory: (token: string) => Pr
       if (!token) throw new Error('Drive API error: No access token available for retry after 429');
       return await retryFactory(token);
     } catch (err: any) {
-      console.error('[Drive API] Error during 429 retry:', err?.message || err);
+      logger.error('Error during 429 retry:', err?.message || err);
       attempt++;
     }
   }
@@ -45,14 +48,14 @@ const handleResponse = async (res: Response, retryFactory?: (token: string) => P
   if (!res.ok) {
     // R5: Handle 429 with exponential backoff (1s → 2s → 4s → 8s → max 32s)
     if (res.status === 429) {
-      console.warn('[Drive API] Rate limited (429), applying exponential backoff with Retry-After support');
+      logger.warn('Rate limited (429), applying exponential backoff with Retry-After support');
       const token = await getAccessToken();
       if (!token || !retryFactory) throw new Error('Drive API error (429): Rate limited and no retry path available');
       await res.body?.cancel().catch(() => { });
       return sleepWithRetry(res, retryFactory);
     }
     if (res.status >= 500 && retryFactory) {
-      console.warn(`[Drive API] Server error (${res.status}), applying exponential backoff`);
+      logger.warn(`Server error (${res.status}), applying exponential backoff`);
       await res.body?.cancel().catch(() => { });
       return sleepWithRetry(res, retryFactory);
     }
@@ -62,13 +65,13 @@ const handleResponse = async (res: Response, retryFactory?: (token: string) => P
       if (retryFactory) {
         if (!refreshPromise) {
           refreshPromise = (async () => {
-            console.log('[Drive API] 401 recibido. Intentando renovar token antes de fallar...');
+            logger.info('401 recibido. Intentando renovar token antes de fallar...');
             await refreshAccessToken();
           })();
         }
         await refreshPromise;
         refreshPromise = null;
-        
+
         const refreshed = await getAccessToken();
         if (refreshed) {
           const retryRes = await retryFactory(refreshed);
@@ -102,8 +105,15 @@ export const listFiles = async (folderId = 'root'): Promise<DriveFile[]> => {
   const query = `'${folderId}' in parents and trashed = false`;
   let allFiles: DriveFile[] = [];
   let pageToken: string | undefined = undefined;
+  const MAX_PAGES = 100;
+  let pageCount = 0;
 
   do {
+    pageCount++;
+    if (pageCount > MAX_PAGES) {
+      logger.warn(`listFiles exceeded MAX_PAGES (${MAX_PAGES}) for folder ${folderId}`);
+      break;
+    }
     const url = new URL('https://www.googleapis.com/drive/v3/files');
     url.searchParams.append('q', query);
     url.searchParams.append('fields', 'nextPageToken, files(id, name, mimeType, modifiedTime, size, md5Checksum, webViewLink)');
@@ -133,8 +143,15 @@ export const listFolders = async (parentFolderId = 'root'): Promise<DriveFile[]>
   const query = `'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   let allFolders: DriveFile[] = [];
   let pageToken: string | undefined = undefined;
+  const MAX_PAGES = 100;
+  let pageCount = 0;
 
   do {
+    pageCount++;
+    if (pageCount > MAX_PAGES) {
+      logger.warn(`listFolders exceeded MAX_PAGES (${MAX_PAGES}) for parent ${parentFolderId}`);
+      break;
+    }
     const url = new URL('https://www.googleapis.com/drive/v3/files');
     url.searchParams.append('q', query);
     url.searchParams.append('fields', 'nextPageToken, files(id, name, mimeType, modifiedTime)');
@@ -185,12 +202,12 @@ export const uploadFile = async (folderId: string, name: string, content: string
   const sizeThreshold = 5 * 1024 * 1024; // 5 MB para conmutar a Resumable Upload
 
   if (fileBlob.size >= sizeThreshold) {
-    console.log(`[Drive API] Archivo pesado (${Math.round(fileBlob.size / 1024 / 1024)} MB). Usando protocolo Resumable Upload para protección ante cortes WiFi.`);
+    logger.info(`Archivo pesado (${Math.round(fileBlob.size / 1024 / 1024)} MB). Usando protocolo Resumable Upload para protección ante cortes WiFi.`);
     // B7 Fix: Intentar resumable upload con retry para 401 (token expirado durante subida)
     const attemptResumable = async (retry = true): Promise<DriveFile | null> => {
       const token = await getAccessToken();
       if (!token) throw new Error('Not authenticated');
-      
+
       const doFetch = () => fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,modifiedTime', {
         method: 'POST',
         headers: {
@@ -248,7 +265,6 @@ export const uploadFile = async (folderId: string, name: string, content: string
   const verifiedRes = await handleResponse(res, doFetch);
   return await verifiedRes.json();
 };
-
 
 export const deleteFile = async (fileId: string): Promise<void> => {
   const token = await getAccessToken();

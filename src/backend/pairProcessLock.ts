@@ -52,31 +52,56 @@ export async function acquirePairLock(lockDirectory: string, pairId: string): Pr
   await fs.mkdir(lockDirectory, { recursive: true, mode: 0o700 });
   const safeName = createHash('sha256').update(pairId).digest('hex');
   const lockPath = path.join(lockDirectory, `${safeName}.lock`);
-  let handle: fs.FileHandle;
+
+  // Intento atómico de crear el lock con contenido
   try {
-    handle = await fs.open(lockPath, 'wx', 0o600);
+    // Usar O_CREAT | O_EXCL | O_WRONLY para asegurar atomicidad
+    const handle = await fs.open(lockPath, 'wx', 0o600);
+    await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
+    await handle.close();
+
+    let released = false;
+    return {
+      lockPath,
+      async release(): Promise<void> {
+        if (released) return;
+        released = true;
+        await fs.rm(lockPath, { force: true });
+      },
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      // Lock ya existe - verificar si es huérfano y reclamarlo atómicamente
       const reclaimed = await reclaimStaleLock(lockPath);
       if (reclaimed) {
-        handle = await fs.open(lockPath, 'wx', 0o600);
+        // Intentar crear el lock nuevamente después de reclamar
+        try {
+          const handle = await fs.open(lockPath, 'wx', 0o600);
+          await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
+          await handle.close();
+
+          let released = false;
+          return {
+            lockPath,
+            async release(): Promise<void> {
+              if (released) return;
+              released = true;
+              await fs.rm(lockPath, { force: true });
+            },
+          };
+        } catch (retryError) {
+          if ((retryError as NodeJS.ErrnoException).code === 'EEXIST') {
+            // Otro proceso ganó la carrera - el lock está activo
+            throw new PairAlreadyRunningError(pairId);
+          }
+          throw retryError;
+        }
       } else {
+        // Lock está activo y pertenece a otro proceso
         throw new PairAlreadyRunningError(pairId);
       }
     } else {
       throw error;
     }
   }
-
-  await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
-  await handle.close();
-  let released = false;
-  return {
-    lockPath,
-    async release(): Promise<void> {
-      if (released) return;
-      released = true;
-      await fs.rm(lockPath, { force: true });
-    },
-  };
 }

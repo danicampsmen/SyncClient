@@ -33,11 +33,24 @@ export class Logger {
                 fs.mkdirSync(logDirectory, { recursive: true });
             }
             const logPath = path.join(logDirectory, 'sync-client.log');
-            // TODO: Implement log rotation
+
+            // FASE 3: Rotación básica de logs (Límite 5MB, mantener 3 historiales)
+            if (fs.existsSync(logPath)) {
+                const stats = fs.statSync(logPath);
+                if (stats.size > 5 * 1024 * 1024) { // 5 MB
+                    for (let i = 2; i >= 1; i--) {
+                        const oldPath = path.join(logDirectory, `sync-client.${i}.log`);
+                        const newerPath = path.join(logDirectory, `sync-client.${i + 1}.log`);
+                        if (fs.existsSync(oldPath)) fs.renameSync(oldPath, newerPath);
+                    }
+                    fs.renameSync(logPath, path.join(logDirectory, 'sync-client.1.log'));
+                }
+            }
+
             Logger.logStream = fs.createWriteStream(logPath, { flags: 'a' });
-            console.log(`[Logger] Logging to file: ${logPath}`);
+            new Logger('Logger').info(`Logging to file: ${logPath}`);
         } catch (error) {
-            console.error('[Logger] Failed to initialize file logging:', error);
+            new Logger('Logger').error('Failed to initialize file logging:', error);
             Logger.logStream = null;
         }
     }

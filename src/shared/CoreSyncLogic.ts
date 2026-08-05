@@ -61,6 +61,11 @@ export interface SyncPlan {
     remoteId: string;
     localPath: string; // <-- AÑADIDO: Permite mostrar el nombre real en la interfaz
   }>;
+  adoptions: Array<{
+    localPath: string;
+    remoteFile: RemoteEntry;
+    vectorClock: string;
+  }>;
   conflicts: Array<{
     localPath: string;
     remoteFile: RemoteEntry;
@@ -80,6 +85,7 @@ export interface SyncStateSnapshot {
   fileSize: number | null;
   baseHash?: string | null;
   vectorClock?: string | null;
+  rawName?: string; // The exact string from disk (NFD etc)
   isTombstone?: boolean; // <-- AÑADIDO: Flag para identificar archivos borrados en Drive
 }
 
@@ -91,6 +97,8 @@ export class CoreSyncLogic {
   public static readonly DEFAULT_IGNORE_PATTERNS: string[] = [
     '*.tmp',
     '*.temp',
+    '*.syncclient-download-*',
+    '*.syncclient-tmp-*',
     '.*',
     '~*',
     '*~',
@@ -99,7 +107,35 @@ export class CoreSyncLogic {
     '*.aux',
     '*.log',
     '*.out',
-    '.*-SAVE-ERROR*'
+    '.*-SAVE-ERROR*',
+    '*.toc',
+    '*.synctex.gz',
+    '*.synctex(busy)',
+    '*.run.xml',
+    '*.bcf*',
+    '*.bbl*',
+    '*.blg',
+    '*.ind',
+    '*.ilg',
+    '*.idx',
+    'auto',
+    '*.minted',
+    '_minted-*',
+    '*.snm',
+    '*.nav',
+    '*.cwl',
+    '*.conflict*',
+    '__MACOSX',
+    '.DS_Store',
+    'Thumbs.db',
+    'desktop.ini',
+    '*.pyc',
+    '__pycache__',
+    '*.pyi',
+    '.ttxfolder',
+    '.venv',
+    'venv',
+    'env'
   ];
 
   /**
@@ -209,8 +245,8 @@ export class CoreSyncLogic {
    * FUNCIÓN PURA: sin I/O, sin DB, sin Drive. 100% testeable.
    */
   public static computeSyncPlan(
-    localSnapshot: ReadonlyMap<string, { name: string; mtime: number; size: number; hash?: string | null }>,
-    remoteSnapshot: ReadonlyMap<string, RemoteEntry>,
+    localSnapshot: Map<string, { name: string; mtime: number; size: number; hash?: string | null; rawName?: string }>,
+    remoteSnapshot: Map<string, RemoteEntry>,
     dbState: ReadonlyMap<string, SyncStateSnapshot>,
     deviceId: string
   ): SyncPlan {
@@ -219,17 +255,18 @@ export class CoreSyncLogic {
       downloads: [],
       deleteLocal: [],
       deleteRemote: [],
+      adoptions: [],
       conflicts: []
     };
 
-    // Índice case-insensitive para Drive
-    const remoteByLowerName = new Map<string, RemoteEntry>();
+    // Índice case-sensitive para Drive (conservar casing exacto)
+    const remoteByName = new Map<string, RemoteEntry>();
     for (const [_, entry] of remoteSnapshot) {
-      remoteByLowerName.set(entry.name.toLowerCase(), entry);
+      remoteByName.set(entry.name, entry);
     }
 
     // Índice case-insensitive para local
-    const localByLowerName = new Map<string, { name: string; mtime: number; size: number; hash?: string | null }>();
+    const localByLowerName = new Map<string, { name: string; mtime: number; size: number; hash?: string | null; rawName?: string }>();
     for (const [relPath, entry] of localSnapshot) {
       localByLowerName.set(entry.name.toLowerCase(), entry);
     }
@@ -242,20 +279,28 @@ export class CoreSyncLogic {
 
     // 1. Procesar archivos locales (Cambios locales o conflictos)
     for (const [relPath, localEntry] of localSnapshot) {
-      const lowerName = localEntry.name.toLowerCase();
       const dbEntry = dbState.get(relPath);
-      const remoteEntry = remoteByLowerName.get(lowerName);
+      const remoteEntry = remoteByName.get(localEntry.name);
 
-      if (remoteEntry) processedRemotes.add(lowerName);
+      if (remoteEntry) processedRemotes.add(localEntry.name);
 
       if (!dbEntry) {
-        // Nuevo archivo local — subir
-        plan.uploads.push({
-          localPath: relPath,
-          remoteName: localEntry.name,
-          remoteId: remoteEntry?.id,
-          vectorClock: JSON.stringify({ [deviceId]: 1 })
-        });
+        if (remoteEntry) {
+          // Archivo nuevo localmente pero ya existe remotamente (posible adopción)
+          plan.adoptions.push({
+            localPath: localEntry.rawName || relPath,
+            remoteFile: remoteEntry,
+            vectorClock: JSON.stringify({ [deviceId]: 1 })
+          });
+        } else {
+          // Nuevo archivo local — subir
+          plan.uploads.push({
+            localPath: localEntry.rawName || relPath,
+            remoteName: localEntry.name,
+            remoteId: undefined,
+            vectorClock: JSON.stringify({ [deviceId]: 1 })
+          });
+        }
         continue;
       }
 
@@ -309,7 +354,7 @@ export class CoreSyncLogic {
           // Solo local cambió — upload
           const localVc = VectorClockManager.increment(parseClock(dbEntry.vectorClock), deviceId);
           plan.uploads.push({
-            localPath: relPath,
+            localPath: localEntry.rawName || relPath,
             remoteName: localEntry.name,
             remoteId: dbEntry.remoteId,
             vectorClock: JSON.stringify(localVc)
@@ -318,7 +363,7 @@ export class CoreSyncLogic {
       } else {
         // Solo existe localmente pero ha sido modificado — upload (sobreescribiendo si aplica)
         plan.uploads.push({
-          localPath: relPath,
+          localPath: localEntry.rawName || relPath,
           remoteName: localEntry.name,
           remoteId: dbEntry.remoteId,
           vectorClock: JSON.stringify(VectorClockManager.increment(parseClock(dbEntry.vectorClock), deviceId))
@@ -329,7 +374,7 @@ export class CoreSyncLogic {
     // 2. Procesar archivos remotos no cubiertos por el loop local (Descargas)
     for (const [_, remoteEntry] of remoteSnapshot) {
       const lowerName = remoteEntry.name.toLowerCase();
-      if (processedRemotes.has(lowerName)) continue;
+      if (processedRemotes.has(remoteEntry.name)) continue;
 
       const localEntry = localByLowerName.get(lowerName);
       const dbEntry = Array.from(dbState.entries()).find(([k, v]) => k.toLowerCase() === lowerName)?.[1];

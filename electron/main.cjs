@@ -2,6 +2,25 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, session, dialog, ipcMain, s
 const path = require('path');
 const fs = require('fs');
 
+// Cargar variables de .env para el proceso principal de Electron
+// (Vite solo inyecta VITE_* en el bundle del navegador, no en Node.js)
+try {
+  const envPath = path.join(__dirname, '..', '.env');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    for (const line of envContent.split('\n')) {
+      const match = line.match(/^([^#=\s][^=]*)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim();
+        if (!process.env[key]) process.env[key] = value;
+      }
+    }
+  }
+} catch (e) {
+  console.warn('[Electron] No se pudo cargar .env:', e?.message || e);
+}
+
 const firefoxUserAgent = 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0';
 
 app.whenReady().then(() => {
@@ -56,8 +75,12 @@ ipcMain.handle('secure-store-set', async (_event, key, value) => {
       encrypted: encrypted.toString('base64'),
     };
   } else {
-    // Persistir refresh tokens sin cifrar anula el propósito de este bridge.
-    throw new Error('El almacenamiento cifrado del sistema no está disponible');
+    // Fallback: Si Linux no tiene Keyring, guardamos codificado para evitar que falle la app.
+    console.warn(`[Electron] Almacenamiento cifrado nativo no disponible en este OS. Guardando codificado en fallback.`);
+    secureStoreState[key] = {
+      version: 0,
+      plain: Buffer.from(value).toString('base64'),
+    };
   }
   await persistSecureStoreState();
   return true;
@@ -75,6 +98,9 @@ ipcMain.handle('secure-store-get', async (_event, key) => {
       console.warn('[Electron] No se pudo descifrar valor seguro:', error?.message || error);
       return null;
     }
+  }
+  if (item.version === 0 && typeof item.plain === 'string') {
+    return Buffer.from(item.plain, 'base64').toString('utf8');
   }
   return null;
 });
@@ -124,20 +150,29 @@ function generateCodeChallenge(verifier) {
   return base64URLEncode(hash);
 }
 
-async function exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri) {
+async function exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri, clientSecret) {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    code,
+    code_verifier: codeVerifier,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code'
+  });
+  if (clientSecret) params.append('client_secret', clientSecret);
+
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code'
-    }).toString()
+    body: params.toString()
   });
   if (!response.ok) {
-    throw new Error(`Google rechazó el intercambio OAuth (${response.status})`);
+    const errBody = await response.json().catch(() => ({}));
+    // Si falla con client_secret, reintentar sin él (compatibilidad Desktop/PKCE)
+    if (clientSecret && errBody.error === 'invalid_client') {
+      console.warn('[Electron] Token exchange con client_secret falló (invalid_client), reintentando sin secret...');
+      return exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri, null);
+    }
+    throw new Error(`Google rechazó el intercambio OAuth (${response.status}): ${errBody.error_description || errBody.error || 'unknown'}`);
   }
   const tokens = await response.json();
   if (!tokens.access_token) throw new Error('Google no devolvió access_token');
@@ -159,7 +194,8 @@ async function openGoogleAuth() {
       }
     })();
   if (!clientId) throw new Error('Falta oAuthClientId en la configuración pública de Firebase');
-  const redirectUri = 'http://localhost:3000/api/oauth/callback';
+  const clientSecret = process.env.VITE_GOOGLE_CLIENT_SECRET || '';
+  const redirectUri = 'http://127.0.0.1:3000/api/oauth/callback';
   const scope = 'https://www.googleapis.com/auth/drive profile email';
 
   // Generar PKCE
@@ -200,7 +236,7 @@ async function openGoogleAuth() {
     authWindow.webContents.setUserAgent(firefoxUserAgent);
 
     authWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      { urls: ['https://accounts.google.com/*', 'https://*.google.com/*', 'http://localhost:3000/*'] },
+      { urls: ['https://accounts.google.com/*', 'https://*.google.com/*', 'http://127.0.0.1:3000/*'] },
       (details, callback) => {
         delete details.requestHeaders['Sec-Ch-Ua'];
         delete details.requestHeaders['Sec-Ch-Ua-Mobile'];
@@ -238,23 +274,13 @@ async function openGoogleAuth() {
 
       navigationEvent?.preventDefault();
       codeReceived = true;
-      console.log('[Electron] Authorization code recibido; validando state/sesión local...');
+      console.log('[Electron] Authorization code recibido; intercambiando directamente con Google...');
 
       try {
-        const relayResult = await authWindow.webContents.executeJavaScript(`fetch('/api/oauth/token', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: ${JSON.stringify(code)},
-            state: ${JSON.stringify(state)},
-            codeVerifier: ${JSON.stringify(codeVerifier)}
-          })
-        }).then(async response => ({ ok: response.ok, status: response.status }))`, true);
-        if (!relayResult?.ok) {
-          throw new Error(`El relay rechazó la sesión OAuth (${relayResult?.status || 'sin respuesta'})`);
-        }
-        const tokens = await exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri);
+        // En Electron, intercambiamos el code directamente con Google (PKCE).
+        // NO usamos el relay del servidor (/api/oauth/token) porque la página
+        // de callback compite con nosotros y consume la transacción primero → 400.
+        const tokens = await exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri, clientSecret);
         if (!tokens?.accessToken) throw new Error('Google no devolvió un token válido');
         const driveResponse = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
           headers: { Authorization: `Bearer ${tokens.accessToken}` }
@@ -280,7 +306,7 @@ async function openGoogleAuth() {
     // Crear la sesión/cookie y registrar el state antes de abrir Google.
     void (async () => {
       try {
-        await authWindow.loadURL('http://localhost:3000/api/session/bootstrap');
+        await authWindow.loadURL('http://127.0.0.1:3000/api/session/bootstrap');
         const prepared = await authWindow.webContents.executeJavaScript(`fetch('/api/oauth/prepare', {
           method: 'POST',
           credentials: 'include',
@@ -311,11 +337,33 @@ function openTrustedExternal(url) {
   if (typeof url !== 'string') throw new Error('URL externa inválida');
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:') throw new Error('Sólo se permiten URLs HTTPS externas');
+
+  // Hardening: Restringir qué dominios puede abrir Electron en el navegador del SO
+  const allowedDomains = ['accounts.google.com', 'drive.google.com', 'www.googleapis.com'];
+  if (!allowedDomains.includes(parsed.hostname)) {
+    throw new Error(`Seguridad: Dominio no permitido para abrir externamente (${parsed.hostname})`);
+  }
+
   return shell.openExternal(parsed.toString());
 }
 
 ipcMain.handle('openExternal', async (_event, url) => openTrustedExternal(url));
 ipcMain.handle('open-external', async (_event, url) => openTrustedExternal(url));
+
+// Conectar la implementación de OAuth nativo de Electron al renderer
+ipcMain.handle('google-auth', async () => {
+  if (activeOAuthPromise) {
+    console.log('[Electron] OAuth ya en progreso, reutilizando promesa existente.');
+    return activeOAuthPromise;
+  }
+  try {
+    activeOAuthPromise = openGoogleAuth();
+    const result = await activeOAuthPromise;
+    return result;
+  } finally {
+    activeOAuthPromise = null;
+  }
+});
 
 ipcMain.handle('set-auto-start', async (_event, enable) => {
   try {
@@ -358,13 +406,93 @@ function startBackend() {
   }
 }
 
-function createTray() {
-  const image = nativeImage.createFromDataURL(iconDataUrl);
-  tray = new Tray(image);
+let currentTrayStatus = {
+  isSyncing: false,
+  percentage: 100,
+  uploadSpeed: 0,
+  downloadSpeed: 0,
+  isOnline: true,
+  pingMs: null,
+  activePairsCount: 0,
+  conflictsCount: 0,
+  currentFile: ''
+};
+
+function formatTraySize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function sendActionToRenderer(action) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('tray-action', action);
+  }
+}
+
+let lastTraySignature = '';
+
+function updateTrayMenu(statusData) {
+  if (statusData) {
+    currentTrayStatus = { ...currentTrayStatus, ...statusData };
+  }
+  if (!tray) return;
+
+  const { isSyncing, percentage, uploadSpeed, downloadSpeed, isOnline, pingMs, activePairsCount, conflictsCount, isPaused } = currentTrayStatus;
+
+  // Evitar parpadeo del menú contextual en Ubuntu/Linux: 
+  // Reconstruir Menu.buildFromTemplate SOLO si el estado principal cambia (ignorando fluctuaciones de ping, velocidad y currentFile)
+  const menuSignature = `${isSyncing}:${Math.floor(percentage / 5)}:${isOnline}:${activePairsCount}:${conflictsCount}:${isPaused}`;
+  if (menuSignature === lastTraySignature) {
+    return;
+  }
+  lastTraySignature = menuSignature;
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Abrir Panel SyncClient',
+      label: isOnline ? `🟢 Red: Online` : '🔴 Red: Sin Conexión',
+      enabled: false
+    },
+    {
+      label: isSyncing
+        ? `🚀 Sincronizando (${percentage}%)`
+        : '✅ Estado: Bisincronización al Día (100%)',
+      enabled: false
+    },
+    {
+      label: `📁 Carpetas vinculadas: ${activePairsCount}`,
+      enabled: false
+    },
+    ...(conflictsCount > 0 ? [{
+      label: `⚠️ Conflictos pendientes: ${conflictsCount}`,
+      click: () => {
+        if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+        sendActionToRenderer('open-conflicts');
+      }
+    }] : []),
+    { type: 'separator' },
+    {
+      label: isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar Sincronización',
+      click: () => sendActionToRenderer('toggle-pause-sync')
+    },
+    { type: 'separator' },
+    {
+      label: '⚡ Sincronizar Todo Ahora',
+      click: () => sendActionToRenderer('force-sync-all')
+    },
+    {
+      label: '⚡ Resolver Conflictos por Fecha Reciente',
+      click: () => sendActionToRenderer('resolve-conflicts-mtime')
+    },
+    {
+      label: '🧹 Limpiar Archivos Duplicados Obsoletos',
+      click: () => sendActionToRenderer('clean-duplicates-all')
+    },
+    { type: 'separator' },
+    {
+      label: '🖥️ Abrir Panel SyncClient',
       click: () => {
         if (!mainWindow) {
           createWindow();
@@ -376,7 +504,7 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: 'Salir de SyncClient',
+      label: '❌ Salir de SyncClient',
       click: () => {
         isQuitting = true;
         app.quit();
@@ -384,8 +512,22 @@ function createTray() {
     }
   ]);
 
-  tray.setToolTip('SyncClient - Cliente de Google Drive en Ubuntu');
   tray.setContextMenu(contextMenu);
+}
+
+try {
+  ipcMain.removeHandler('update-tray');
+} catch (e) {}
+ipcMain.handle('update-tray', async (_event, statusData) => {
+  updateTrayMenu(statusData);
+  return true;
+});
+
+function createTray() {
+  const image = nativeImage.createFromDataURL(iconDataUrl);
+  tray = new Tray(image);
+
+  updateTrayMenu();
 
   tray.on('click', () => {
     if (mainWindow) {
@@ -406,6 +548,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: false, // FASE 5: Ocultar hasta que el renderizado esté listo
+    backgroundColor: '#0a0a0a', // Mismo fondo oscuro de Tailwind (neutral-950)
     title: 'SyncClient - Google Drive Ubuntu',
     webPreferences: {
       // contextIsolation: true + preload → Firebase ve un navegador normal, no Node.js
@@ -415,6 +559,11 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       session: mainSession,
     }
+  });
+
+  // Mostrar suavemente cuando el HTML esté listo
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
   });
 
   // Permitir la apertura de ventanas emergentes para el flujo de autenticación de Google/Firebase
@@ -455,31 +604,49 @@ function createWindow() {
     if (errorCode !== -3) { // Ignore ABORTED
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          console.log('[Electron] Reintentando conexión con http://localhost:3000...');
-          mainWindow.loadURL('http://localhost:3000').catch(() => { });
+          console.log('[Electron] Reintentando conexión con http://127.0.0.1:3000...');
+          mainWindow.loadURL('http://127.0.0.1:3000').catch(() => { });
         }
       }, 1000);
     }
   });
 
+  const checkBackendHealth = (healthUrl) => {
+    return new Promise((resolve) => {
+      const req = require('http').get(healthUrl, (res) => {
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(1000, () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+  };
+
   const loadWhenReady = async () => {
-    for (let i = 0; i < 30; i++) {
-      try {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-        await mainWindow.loadURL('http://localhost:3000');
+    let attempts = 0;
+    while (mainWindow && !mainWindow.isDestroyed()) {
+      attempts++;
+      const isHealthy = await checkBackendHealth('http://127.0.0.1:3000/api/health');
+      if (isHealthy) {
+        await mainWindow.loadURL('http://127.0.0.1:3000');
         console.log('[Electron] Conexión establecida con el servidor backend.');
-        mainWindow.webContents.openDevTools({ mode: 'detach' });
+
+        // Ocultar DevTools en el build de producción
+        if (!app.isPackaged) {
+          mainWindow.webContents.openDevTools({ mode: 'detach' });
+        }
+
         mainWindow.webContents.on('did-finish-load', () => {
           console.log('[Electron] Frontend cargado correctamente.');
         });
-        mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
-          console.error('[Electron] Fallo al cargar frontend:', errorCode, errorDescription);
-        });
         return;
-      } catch (e) {
-        console.log(`[Electron] Servidor backend iniciando, reintentando (${i + 1}/30)...`);
-        await new Promise(res => setTimeout(res, 500));
       }
+      if (attempts % 5 === 0 || attempts === 1) {
+        console.log(`[Electron] Servidor backend iniciando, reintentando (${attempts})...`);
+      }
+      await new Promise(res => setTimeout(res, 500));
     }
   };
   loadWhenReady();

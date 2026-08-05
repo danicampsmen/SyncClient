@@ -10,6 +10,8 @@ import {
   RESUMABLE_UPLOAD_CHUNK_SIZE,
   uploadResumableFile,
   validateChunkSize,
+  FileNotFoundError,
+  TransferHttpError,
   type PersistedUploadSession,
   type TransferHttpClient,
 } from './transfer';
@@ -264,5 +266,34 @@ describe('downloadToAtomicFile', () => {
       sleep: async () => undefined,
     })).rejects.toThrow('checksum mismatch');
     expect(await readdir(directory)).toEqual(['large.bin']);
+  });
+
+  it('throws FileNotFoundError on 404 without retrying', async () => {
+    const { directory } = await tempFile(0);
+    const destinationPath = path.join(directory, 'download.bin');
+    const request = vi.fn<TransferHttpClient['request']>().mockResolvedValue(response({}, 404));
+    const delays: number[] = [];
+    await expect(downloadToAtomicFile({
+      sourceUrl: 'https://drive.test/missing',
+      destinationPath,
+      client: client(request),
+      markSelfWritten: vi.fn(),
+      sleep: async ms => { delays.push(ms); },
+    })).rejects.toThrow(FileNotFoundError);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(delays).toHaveLength(0);
+  });
+
+  it('throws TransferHttpError (not FileNotFoundError) on 500', async () => {
+    const { directory } = await tempFile(0);
+    const destinationPath = path.join(directory, 'download.bin');
+    const request = vi.fn<TransferHttpClient['request']>().mockResolvedValue(response({}, 503));
+    await expect(downloadToAtomicFile({
+      sourceUrl: 'https://drive.test/error',
+      destinationPath,
+      client: client(request),
+      markSelfWritten: vi.fn(),
+      sleep: async () => undefined,
+    })).rejects.toThrow(TransferHttpError);
   });
 });

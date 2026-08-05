@@ -1,4 +1,7 @@
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Logger } from '../shared/browserLogger';
+
+const logger = new Logger('FileSystem');
 
 export interface FileEntry {
   name: string;
@@ -224,7 +227,7 @@ export class CapacitorFS implements IFileSystem {
         });
       }
     } catch (err) {
-      console.error(`[CapacitorFS] Error renombrando ${oldPath} -> ${newPath}:`, err);
+      logger.error(`Error renombrando ${oldPath} -> ${newPath}:`, err);
       throw err;
     }
   }

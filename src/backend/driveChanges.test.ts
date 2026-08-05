@@ -156,4 +156,17 @@ describe('DriveChangesIngestor', () => {
     expect(url.searchParams.get('includeItemsFromAllDrives')).toBe('true');
     expect(url.searchParams.get('supportsAllDrives')).toBe('true');
   });
+
+  it('bounds pagination to avoid unbounded nextPageToken loops', async () => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockImplementation(() => response({ changes: [], nextPageToken: 'loop' }));
+
+    await expect(new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    )).rejects.toThrow('pagination exceeded');
+
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
 });

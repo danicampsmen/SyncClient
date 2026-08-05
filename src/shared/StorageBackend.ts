@@ -18,6 +18,9 @@ import {
     SyncOperation,
     UploadSession,
 } from './schema';
+import { Logger } from '../backend/logger';
+
+const logger = new Logger('StorageBackend');
 
 // ─── IStorageBackend ────────────────────────────────────────────
 
@@ -27,6 +30,7 @@ export interface IStorageBackend {
 
     // CRUD de estado de archivos (síncrono — opera en RAM/DB)
     getFileState(pairId: string, relPath: string): FileState | null;
+    getFileStateByRemoteId(pairId: string, remoteId: string): FileState | null;
     getFolderState(pairId: string): Map<string, FileState>;
     setFileState(pairId: string, relPath: string, state: FileState): void;
     deleteFileState(pairId: string, relPath: string): void;
@@ -67,6 +71,7 @@ export interface IStorageBackend {
     // Mantenimiento
     vacuum(): void;
     checkpoint(): Promise<void>;
+    clearDatabase(): Promise<void>;
     close(): Promise<void>;
 }
 
@@ -192,7 +197,7 @@ export class SQLiteBackend implements IStorageBackend {
                 return this.initNative(createRequire);
             }
         } catch (e: any) {
-            console.error('[SQLiteBackend] Init failed:', e.message || e);
+            logger.error('[SQLiteBackend] Init failed:', e.message || e);
             return false;
         }
     }
@@ -206,18 +211,53 @@ export class SQLiteBackend implements IStorageBackend {
                     const data = this.db.export();
                     await this.fs.writeFile(this.dbPath, data);
                     this.db.close();
-                    console.log('[SQLiteBackend/WASM] Database saved and closed.');
+                    logger.info('[SQLiteBackend/WASM] Database saved and closed.');
                 } else {
-                    console.warn('[SQLiteBackend/WASM] Filesystem not available, cannot save database.');
+                    logger.warn('[SQLiteBackend/WASM] Filesystem not available, cannot save database.');
                     this.db.close();
                 }
             } else {
                 // better-sqlite3 (Nativo)
                 this.db.close();
-                console.log('[SQLiteBackend/Native] Database closed.');
+                logger.info('[SQLiteBackend/Native] Database closed.');
             }
             this.db = null;
         }
+    }
+
+    async clearDatabase(): Promise<void> {
+        if (!this.db) return;
+        const tables = [
+            'file_states',
+            'sync_operations',
+            'sync_journal',
+            'drive_cursors',
+            'devices',
+            'sync_conflicts',
+            'upload_sessions'
+        ];
+
+        if (isCapacitor()) {
+            this.db.run('BEGIN');
+            try {
+                for (const table of tables) {
+                    this.db.run(`DELETE FROM ${table}`);
+                }
+                this.db.run('COMMIT');
+                await this.checkpoint();
+            } catch (err) {
+                this.db.run('ROLLBACK');
+                throw err;
+            }
+        } else {
+            const stmt = this.db.transaction(() => {
+                for (const table of tables) {
+                    this.db.prepare(`DELETE FROM ${table}`).run();
+                }
+            });
+            stmt();
+        }
+        logger.warn('[SQLiteBackend] All database tables have been cleared.');
     }
 
     private initNative(createRequire: (url: string | URL) => NodeRequire): boolean {
@@ -244,20 +284,20 @@ export class SQLiteBackend implements IStorageBackend {
             this.db = new Database(this.dbPath);
         } catch (e: any) {
             if (e.message?.includes('SQLITE_CORRUPT') || e.message?.includes('file is not a database')) {
-                console.warn('[SQLiteBackend] DB corrupta, intentando restaurar desde backup...');
+                logger.warn('[SQLiteBackend] DB corrupta, intentando restaurar desde backup...');
                 try {
                     const backupPath = this.dbPath + '.backup';
                     if (fsMod.existsSync(backupPath)) {
                         fsMod.copyFileSync(backupPath, this.dbPath);
                         this.db = new Database(this.dbPath);
-                        console.log('[SQLiteBackend] DB restaurada desde backup exitosamente.');
+                        logger.info('[SQLiteBackend] DB restaurada desde backup exitosamente.');
                     } else {
-                        console.warn('[SQLiteBackend] No hay backup disponible, creando DB nueva...');
+                        logger.warn('[SQLiteBackend] No hay backup disponible, creando DB nueva...');
                         try { fsMod.unlinkSync(this.dbPath); } catch { }
                         this.db = new Database(this.dbPath);
                     }
                 } catch (restoreError: any) {
-                    console.warn('[SQLiteBackend] No se pudo restaurar, creando DB nueva...');
+                    logger.warn('[SQLiteBackend] No se pudo restaurar, creando DB nueva...');
                     try { fsMod.unlinkSync(this.dbPath); } catch { }
                     this.db = new Database(this.dbPath);
                 }
@@ -280,7 +320,7 @@ export class SQLiteBackend implements IStorageBackend {
         const maxId = this.db.prepare('SELECT MAX(id) as mx FROM sync_journal').get()?.mx;
         this.nextJournalId = (maxId || 0) + 1;
 
-        console.log('[SQLiteBackend] Native (better-sqlite3) initialized at', this.dbPath);
+        logger.info('[SQLiteBackend] Native (better-sqlite3) initialized at', this.dbPath);
         return true;
     }
 
@@ -307,7 +347,7 @@ export class SQLiteBackend implements IStorageBackend {
         const maxId = this.db.exec('SELECT MAX(id) as mx FROM sync_journal');
         this.nextJournalId = ((maxId?.[0]?.values?.[0]?.[0] as number) || 0) + 1;
 
-        console.log('[SQLiteBackend] WASM (sql.js) initialized');
+        logger.info('[SQLiteBackend] WASM (sql.js) initialized');
         return true;
     }
 
@@ -328,7 +368,7 @@ export class SQLiteBackend implements IStorageBackend {
                 const raw = await this.fs.readFile(this.dbPath + '.backup');
                 const db = new SQL.Database(new Uint8Array(raw));
                 db.run('PRAGMA integrity_check');
-                console.warn('[SQLiteBackend] Recovered from backup');
+                logger.warn('[SQLiteBackend] Recovered from backup');
                 return db;
             } catch {
                 throw new Error('Both main and backup are corrupt');
@@ -348,6 +388,19 @@ export class SQLiteBackend implements IStorageBackend {
         const row = isCapacitor()
             ? this._wasmGet(this.db.prepare(query), [pairId, relPath])
             : this.db.prepare(query).get(pairId, relPath);
+        return row ? rowToFileState(row) : null;
+    }
+
+    getFileStateByRemoteId(pairId: string, remoteId: string): FileState | null {
+        const query = `
+            SELECT pair_id, rel_path, remote_id, local_mtime, remote_mtime, file_size,
+                   md5_hash, block_hashes, vector_clock, device_id, etag, updated_at, is_tombstone
+            FROM file_states
+            WHERE pair_id = ? AND remote_id = ?
+        `;
+        const row = isCapacitor()
+            ? this._wasmGet(this.db.prepare(query), [pairId, remoteId])
+            : this.db.prepare(query).get(pairId, remoteId);
         return row ? rowToFileState(row) : null;
     }
 
@@ -696,11 +749,19 @@ export class SQLiteBackend implements IStorageBackend {
             testDb.close();
 
             // 3. Renombrar atómicamente
-            await this.fs.rename(this.dbPath, backupPath).catch(() => { });
+            await this.fs.rename(this.dbPath, backupPath).catch((error: any) => {
+                if (error?.code !== 'ENOENT') {
+                    logger.warn('[SQLiteBackend/WASM] Could not rotate main database to backup:', error?.message || error);
+                }
+            });
             await this.fs.rename(tmpPath, this.dbPath);
 
             // 4. Limpiar backup
-            await this.fs.rm(backupPath).catch(() => { });
+            await this.fs.rm(backupPath).catch((error: any) => {
+                if (error?.code !== 'ENOENT') {
+                    logger.warn('[SQLiteBackend/WASM] Could not remove backup after checkpoint:', error?.message || error);
+                }
+            });
         } catch (e) {
             throw new Error(`SQLite WASM checkpoint failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
         }
@@ -808,6 +869,14 @@ export class JSONBackend implements IStorageBackend {
         }
     }
 
+    async clearDatabase(): Promise<void> {
+        this.data = { fileStates: {}, devices: {}, journal: [], cursors: {}, operations: {}, uploadSessions: {}, conflicts: {} };
+        this.nextJournalId = 1;
+        this.dirty = true;
+        await this.checkpoint();
+        logger.warn('[JSONBackend] All database objects have been cleared.');
+    }
+
     private getStates(pairId: string): Record<string, FileState> {
         if (!this.data.fileStates[pairId]) this.data.fileStates[pairId] = {};
         return this.data.fileStates[pairId];
@@ -815,6 +884,16 @@ export class JSONBackend implements IStorageBackend {
 
     getFileState(pairId: string, relPath: string): FileState | null {
         return this.getStates(pairId)[relPath] || null;
+    }
+
+    getFileStateByRemoteId(pairId: string, remoteId: string): FileState | null {
+        const states = this.getStates(pairId);
+        for (const key in states) {
+            if (states[key].remote_id === remoteId) {
+                return states[key];
+            }
+        }
+        return null;
     }
 
     getFolderState(pairId: string): Map<string, FileState> {
@@ -994,7 +1073,7 @@ export class JSONBackend implements IStorageBackend {
             if (this.fs) {
                 const tmpFile = `${this.configFile}.tmp.${Date.now()}`;
                 await this.fs.writeFile(tmpFile, json);
-                await this.fs.rename(tmpFile, this.configFile).catch(() => { });
+                await this.fs.rename(tmpFile, this.configFile);
             } else {
                 const fs = await import('fs/promises');
                 const tmpFile = `${this.configFile}.tmp.${Date.now()}`;
@@ -1002,7 +1081,7 @@ export class JSONBackend implements IStorageBackend {
                 await fs.rename(tmpFile, this.configFile);
             }
         } catch (e) {
-            console.error('[JSONBackend] Checkpoint failed:', e);
+            logger.error('[JSONBackend] Checkpoint failed:', e);
         }
     }
 
@@ -1022,18 +1101,18 @@ export async function createBackend(configDir: string, fs?: any): Promise<IStora
     try {
         const sqlite = new SQLiteBackend(configDir, fs);
         if (await sqlite.init()) {
-            console.log('[StorageBackend] Using SQLite');
+            logger.info('[StorageBackend] Using SQLite');
             return sqlite;
         }
     } catch (e: any) {
-        console.warn('[StorageBackend] SQLite unavailable:', e.message || e);
+        logger.warn('[StorageBackend] SQLite unavailable:', e.message || e);
     }
 
     // Fallback JSON
     try {
         const json = new JSONBackend(configDir, fs);
         if (await json.init()) {
-            console.log('[StorageBackend] Using JSON (fallback)');
+            logger.warn('[StorageBackend] Using JSON (fallback)');
             return json;
         }
     } catch {

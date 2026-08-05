@@ -13,6 +13,7 @@ const BLOCK_SIZE = 4 * 1024 * 1024; // 4MB
 
 export interface LocalEntry {
     name: string;
+    rawName: string; // The exact string returned by fs.readdir (preserves NFD/NFC)
     fullPath: string;
     mtime: number;
     size: number;
@@ -27,10 +28,8 @@ export interface ScanResult {
 }
 
 /**
- * Calcular SHA-256 por bloques usando streams.
+ * Calcular MD5 usando streams para que coincida exactamente con Google Drive.
  * Nunca carga el archivo completo en RAM.
- * Desktop: usa crypto.createHash + fs.createReadStream
- * Android: delega a Capacitor (por ahora stub, se implementa en F6)
  */
 export async function computeBlockHashes(
     _filePath: string,
@@ -41,39 +40,25 @@ export async function computeBlockHashes(
         return [];
     }
     // Desktop: streaming con crypto
-try {
-         const fs = await import('fs');
-         const crypto = await import('crypto');
-         const hashes: string[] = [];
-         let currentHash = crypto.createHash('sha256');
-         let currentSize = 0;
+    try {
+        const fs = await import('fs');
+        const crypto = await import('crypto');
 
-         return new Promise((resolve, reject) => {
-             const stream = fs.createReadStream(_filePath, { highWaterMark: 1024 * 1024 });
-             stream.on('data', (chunk) => {
-                 let offset = 0;
-                 while (offset < chunk.length) {
-                     const remaining = BLOCK_SIZE - currentSize;
-                     const toHash = chunk.slice(offset, offset + remaining);
-                     currentHash.update(toHash);
-                     currentSize += toHash.length;
-                     offset += toHash.length;
-                     if (currentSize >= BLOCK_SIZE) {
-                         hashes.push(currentHash.digest('hex'));
-                         currentHash = crypto.createHash('sha256');
-                         currentSize = 0;
-                     }
-                 }
-             });
-             stream.on('end', () => {
-                 if (currentSize > 0) hashes.push(currentHash.digest('hex'));
-                 resolve(hashes);
-             });
-             stream.on('error', reject);
-         });
-     } catch (error) {
-         throw error;
-     }
+        return new Promise((resolve, reject) => {
+            const hash = crypto.createHash('md5');
+            const stream = fs.createReadStream(_filePath, { highWaterMark: 2 * 1024 * 1024 }); // Chunks de 2MB
+            stream.on('data', (chunk) => {
+                hash.update(chunk);
+            });
+            stream.on('end', () => {
+                // Devolvemos el array con 1 elemento por compatibilidad con la interfaz existente
+                resolve([hash.digest('hex')]);
+            });
+            stream.on('error', reject);
+        });
+    } catch (error) {
+        throw error;
+    }
 }
 
 /** Comparar hashes por bloques: ¿cambió el contenido real? */
@@ -114,7 +99,9 @@ export async function verifyReadWriteAccess(dir: string, fs: IFileSystem): Promi
         await fs.writeFile(testFile, Date.now().toString());
         await new Promise(r => setTimeout(r, 100));
         const readBack = await fs.readFile(testFile);
-        await fs.rm(testFile).catch(() => { });
+        await fs.rm(testFile).catch(error => {
+            logger.debug(`[Scanner] Could not delete permission check file ${testFile}:`, error instanceof Error ? error.message : String(error));
+        });
         return readBack !== null && readBack !== '';
     } catch {
         return false;
@@ -187,6 +174,7 @@ export async function scanChanges(
 
         const localEntry: LocalEntry = {
             name: normName,
+            rawName: entry.name,
             fullPath: `${dir}/${entry.name}`,
             mtime: entry.mtime || 0,
             size: entry.size || 0,
@@ -276,6 +264,7 @@ async function runWithConcurrency<T>(
     concurrency: number
 ): Promise<T[]> {
     const results: T[] = new Array(tasks.length);
+    const errors: unknown[] = [];
     let index = 0;
 
     const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
@@ -284,11 +273,16 @@ async function runWithConcurrency<T>(
             try {
                 results[i] = await tasks[i]();
             } catch (e: any) {
-                console.error(`[Scanner/LazyHash] Error in worker:`, e.message || e);
+                errors.push(e);
+                logger.error(`[Scanner/LazyHash] Error in worker:`, e?.message || e);
             }
         }
     });
 
     await Promise.all(workers);
-    return results.filter(Boolean);
+    if (errors.length > 0) {
+        const firstError = errors[0];
+        throw firstError instanceof Error ? firstError : new Error(String(firstError));
+    }
+    return results.filter((value): value is T => value !== undefined);
 }

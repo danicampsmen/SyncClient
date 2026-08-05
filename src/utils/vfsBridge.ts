@@ -2,6 +2,9 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { DEFAULT_LOCAL_DIR_NAME, ANDROID_STARNOTE_BASE, ANDROID_STARNOTE_EXPORT } from '../shared/CoreSyncLogic';
 import { backendFetch } from '../services/backendSession';
+import { Logger } from '../shared/browserLogger';
+
+const logger = new Logger('VFSBridge');
 
 /**
  * VFSBridge (Virtual File System Bridge)
@@ -60,7 +63,7 @@ export class VFSBridge {
         '/storage/emulated/0/Download/Respaldos',
         '/storage/emulated/0/DCIM/Camera'
       ];
-      console.log('[VFSBridge/Android] Seleccionando ruta de almacenamiento nativa en dispositivo móvil.');
+      logger.info('Seleccionando ruta de almacenamiento nativa en dispositivo móvil.');
       return suggestedAndroidPaths[0];
     } else {
       if (typeof window !== 'undefined' && (window as any).electronBridge?.selectDirectory) {
@@ -68,7 +71,7 @@ export class VFSBridge {
           const res = await (window as any).electronBridge.selectDirectory();
           if (res && res.path) return res.path;
         } catch (e) {
-          console.error('[VFSBridge] Error en selector nativo de Linux Desktop:', e);
+          logger.error('Error en selector nativo de Linux Desktop:', e);
         }
       }
       return VFSBridge.getHomeDir() + '/Documentos/' + DEFAULT_LOCAL_DIR_NAME;
@@ -81,7 +84,7 @@ export class VFSBridge {
   public static async listLocalDirectories(dirPath: string): Promise<Array<{ name: string; path: string }>> {
     if (this.isNative()) {
       try {
-        try { await Filesystem.requestPermissions(); } catch (_) { }
+        try { await Filesystem.requestPermissions(); } catch (err: any) { logger.warn('Error requesting permissions:', err?.message || err); }
 
         let relativePath = dirPath.replace(/^\/storage\/emulated\/0\/?/, '');
         const res = await Filesystem.readdir({
@@ -96,7 +99,7 @@ export class VFSBridge {
           }))
           .sort((a, b) => a.name.localeCompare(b.name));
       } catch (err: any) {
-        console.warn(`[VFSBridge/Android] Error al listar ${dirPath}:`, err);
+        logger.warn(`Error al listar ${dirPath}:`, err);
         return [];
       }
     } else {
@@ -112,7 +115,7 @@ export class VFSBridge {
           }))
           .sort((a: any, b: any) => a.name.localeCompare(b.name));
       } catch (e) {
-        console.error('[VFSBridge/Linux] Error listando en servidor local:', e);
+        logger.error('Error listando en servidor local:', e);
         return [];
       }
     }
@@ -132,7 +135,7 @@ export class VFSBridge {
         });
         return true;
       } catch (e) {
-        console.error('[VFSBridge/Android] Error creando carpeta local:', e);
+        logger.error('Error creando carpeta local:', e);
         return false;
       }
     } else {
@@ -141,11 +144,11 @@ export class VFSBridge {
           method: 'POST',
         });
         if (!res.ok) {
-          console.warn(`[VFSBridge/Linux] Error creando carpeta (${res.status})`);
+          logger.warn(`Error creando carpeta (${res.status})`);
         }
         return res.ok;
       } catch (e) {
-        console.error('[VFSBridge/Linux] Error creando carpeta en servidor local:', e);
+        logger.error('Error creando carpeta en servidor local:', e);
         return false;
       }
     }
@@ -185,7 +188,7 @@ export class VFSBridge {
         directory: Directory.External,
         encoding: Encoding.UTF8
       });
-      console.log(`[VFSBridge/Android] Guardado exitoso con Capacitor Filesystem: ${filePath}`);
+      logger.info(`Guardado exitoso con Capacitor Filesystem: ${filePath}`);
     } else {
       const res = await backendFetch(`/api/local/content?path=${encodeURIComponent(filePath)}`, {
         method: 'POST',
@@ -263,7 +266,7 @@ export class VFSBridge {
           }
         }
       } catch (e) {
-        console.error('[VFSBridge/Android] Error en deduplicateFolder:', e);
+        logger.error('Error en deduplicateFolder:', e);
       }
     } else {
       try {
@@ -277,7 +280,7 @@ export class VFSBridge {
           renamed = data.renamed || 0;
         }
       } catch (e) {
-        console.error('[VFSBridge/Linux] Error en deduplicateFolder server:', e);
+        logger.error('Error en deduplicateFolder server:', e);
       }
     }
     return { deleted, renamed };

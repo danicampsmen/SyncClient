@@ -26,11 +26,11 @@
     "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.4.2",
     "@capacitor/filesystem": "^8.1.2",
+    "@parcel/watcher": "^2.6.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^13.0.2",
     "capacitor-secure-storage-plugin": "^0.13.0",
-    "chokidar": "^5.0.0",
     "express": "^4.21.2",
     "firebase": "^12.17.0",
     "lucide-react": "^0.546.0",
@@ -50,13 +50,13 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
+    "kill-port": "^2.0.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "vitest": "^4.1.10",
-    "wait-on": "^9.1.0",
-    "kill-port": "^2.0.1"
+    "wait-on": "^9.1.0"
   },
   "build": {
     "appId": "com.syncclient.desktop",

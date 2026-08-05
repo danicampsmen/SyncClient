@@ -1,4 +1,7 @@
 import { Capacitor } from '@capacitor/core';
+import { Logger } from '../shared/browserLogger';
+
+const logger = new Logger('BackendSession');
 
 const BACKEND_ORIGIN = Capacitor.isNativePlatform() ? 'http://localhost:3000' : '';
 const CLIENT_KIND = Capacitor.isNativePlatform()
@@ -84,10 +87,10 @@ export const backendFetch = async (
       if (consecutiveFailures >= CIRCUIT_BREAK_THRESHOLD) {
         circuitOpen = true;
         circuitOpenUntil = Date.now() + CIRCUIT_RESET_MS;
-        console.warn(`[BackendSession] Circuit breaker abierto por ${CIRCUIT_RESET_MS / 1000}s tras ${consecutiveFailures} fallos consecutivos`);
+        logger.warn(`Circuit breaker abierto por ${CIRCUIT_RESET_MS / 1000}s tras ${consecutiveFailures} fallos consecutivos`);
       }
       if (attempt < retries) {
-        console.warn(`[BackendSession] Intento ${attempt}/${retries} fallido, reintentando en ${2 ** (attempt - 1)}s...`);
+        logger.warn(`Intento ${attempt}/${retries} fallido, reintentando en ${2 ** (attempt - 1)}s...`);
         await new Promise(r => setTimeout(r, 1000 * (2 ** (attempt - 1))));
       }
     }

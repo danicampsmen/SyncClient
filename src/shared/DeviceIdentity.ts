@@ -11,6 +11,9 @@
 
 import { IStorageBackend } from './StorageBackend';
 import { DeviceInfo } from './schema';
+import { Logger } from './browserLogger';
+
+const logger = new Logger('DeviceIdentity');
 
 /**
  * Genera un UUID v4 sin depender de crypto.randomUUID()
@@ -103,7 +106,7 @@ export async function getOrCreateDeviceId(
                 deviceId = parsed.deviceId;
                 if (parsed.name) deviceName = parsed.name;
                 if (parsed.platform) platform = parsed.platform;
-                console.log('[DeviceIdentity] Recovered from Drive:', deviceId);
+                logger.info('Recovered from Drive:', deviceId);
             }
         } catch { /* no existe aún o sin conexión */ }
     }
@@ -112,7 +115,7 @@ export async function getOrCreateDeviceId(
     const isNew = !deviceId;
     if (isNew) {
         deviceId = generateUUID();
-        console.log('[DeviceIdentity] New device ID created:', deviceId);
+        logger.info('New device ID created:', deviceId);
 
         // Persistir en Drive para futuras reinstalaciones
         if (driveClient) {
@@ -126,9 +129,9 @@ export async function getOrCreateDeviceId(
                         createdAt: new Date().toISOString()
                     })
                 );
-                console.log('[DeviceIdentity] Sentinel saved to Drive');
+                logger.info('Sentinel saved to Drive');
             } catch {
-                console.warn('[DeviceIdentity] Could not save sentinel to Drive (offline?)');
+                logger.warn('Could not save sentinel to Drive (offline?)');
             }
         }
     }

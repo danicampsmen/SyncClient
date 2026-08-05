@@ -8,6 +8,9 @@ import { VectorClockManager, VectorClock } from '../shared/VectorClock';
 import { scanChanges, computeBlockHashes, lazyHashBatch, isMtimeChanged, hasContentChanged, verifyReadWriteAccess, LocalEntry, ScanResult } from '../shared/Scanner';
 import { Md5 } from '../shared/md5';
 import { refreshAccessToken } from '../auth';
+import { Logger } from '../shared/browserLogger';
+
+const logger = new Logger('SyncEngine');
 
 export interface DriveFile {
   id: string;
@@ -147,7 +150,7 @@ export class SyncEngine {
         try {
           results[currentIndex] = await tasks[currentIndex]();
         } catch (err: any) {
-          console.error(`[SyncEngine/Pool] Error en tarea concurrente:`, err.message || err);
+          logger.error(`[SyncEngine/Pool] Error en tarea concurrente:`, err.message || err);
         }
       }
     });
@@ -190,7 +193,7 @@ export class SyncEngine {
         if (permStatus.publicStorage !== 'granted') {
           await FS.requestPermissions();
         }
-      } catch (permErr: any) { }
+      } catch (permErr: any) { logger.warn('Error checking permissions:', permErr?.message || permErr); }
 
       await this.fs.mkdir(this.configDir);
 
@@ -201,7 +204,7 @@ export class SyncEngine {
           if (this.db) {
             const deviceResult = await getOrCreateDeviceId(this.db);
             this.DEVICE_ID = deviceResult.deviceId;
-            console.log(`[SyncEngine] v2 DB initialized, device: ${this.DEVICE_ID}`);
+            logger.info(`v2 DB initialized, device: ${this.DEVICE_ID}`);
 
             try {
               const data = await this.fs.readFile(this.configFile);
@@ -232,10 +235,10 @@ export class SyncEngine {
                   }
                 }
               }
-            } catch { }
+            } catch (err: any) { logger.warn('Error parsing configFile JSON manifests:', err?.message || err); }
           }
         }
-      } catch (e: any) { }
+      } catch (e: any) { logger.warn('Error initializing v2 DB:', e?.message || e); }
 
       try {
         const data = await this.fs.readFile(this.configFile);
@@ -253,7 +256,7 @@ export class SyncEngine {
           if (parsed.manifests && !this.db) this.manifests = parsed.manifests;
           if (parsed.pendingConflicts) this.pendingConflicts = parsed.pendingConflicts;
         }
-      } catch (e: any) { }
+      } catch (e: any) { logger.warn('Error reading configFile:', e?.message || e); }
 
       if (this.pairs.length > 0) {
         let modified = false;
@@ -270,7 +273,7 @@ export class SyncEngine {
         if (modified) await this.saveState();
       }
       this.refreshIntervals();
-    } catch (err: any) { }
+    } catch (err: any) { logger.warn('Error in init():', err?.message || err); }
   }
 
   private async saveState() {
@@ -291,7 +294,7 @@ export class SyncEngine {
       const tmpFile = `${this.configFile}.tmp.${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
       await this.fs.writeFile(tmpFile, JSON.stringify(data));
       await this.fs.rename(tmpFile, this.configFile);
-    } catch (err) { } finally {
+    } catch (err: any) { logger.error('Error saving state:', err?.message || err); } finally {
       this.isSavingState = false;
       if (this.needsSaveState) {
         this.needsSaveState = false;
@@ -877,7 +880,13 @@ export class SyncEngine {
 
     let files: DriveFile[] = [];
     let pageToken: string | undefined = undefined;
+    let pageCount = 0;
+    const MAX_PAGES = 1000;
     do {
+      if (++pageCount > MAX_PAGES) {
+        logger.warn(`listDriveFiles exceeded MAX_PAGES (${MAX_PAGES}) for folder ${folderId}`);
+        break;
+      }
       const url = new URL('https://www.googleapis.com/drive/v3/files');
       url.searchParams.append('q', `'${folderId}' in parents and trashed = false`);
       url.searchParams.append('fields', 'nextPageToken, files(id, name, mimeType, modifiedTime, size, md5Checksum, webViewLink, appProperties)');

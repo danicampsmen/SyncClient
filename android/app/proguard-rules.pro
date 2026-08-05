@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# FASE 5: Reglas para Capacitor y Plugins
+-keep class com.getcapacitor.** { *; }
+-keep class androidx.core.splashscreen.** { *; }
+-keep class com.capacitorjs.plugins.** { *; }
+-keep class com.securestorage.plugin.** { *; }
+
+# Mantener las interfaces de puente
+-keep public class * extends com.getcapacitor.Plugin

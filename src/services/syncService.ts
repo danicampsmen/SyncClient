@@ -1,6 +1,10 @@
 import { Capacitor } from '@capacitor/core';
 import { SyncPair, SyncSettings } from '../types';
 import { backendFetch } from './backendSession';
+import { Logger } from '../shared/browserLogger';
+
+// FINDING-27 fix: usar browserLogger en lugar de console.* directo (R16)
+const logger = new Logger('SyncService');
 
 let SyncEngine: any = null;
 let CapacitorFS: any = null;
@@ -21,7 +25,7 @@ class SyncService {
 
   constructor() {
     if (this.isNative) {
-      console.log('[SyncService] Native engine requested; will be loaded lazily on first use.');
+      logger.info('Native engine requested; will be loaded lazily on first use.');
     }
   }
 
@@ -35,17 +39,16 @@ class SyncService {
     }
   }
 
-  public async setToken(token: string | null) {
+  public async setToken(token: string | null, refreshToken?: string | null) {
     if (this.isNative) {
       await this.ensureNativeEngine();
-      await this.ensureNativeEngine();
-      this.localEngine?.setToken(token);
+      this.localEngine?.setToken(token, refreshToken);
     } else {
       await backendFetch('/api/sync/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token })
-      }).catch(err => console.error('Error syncing token to backend:', err));
+        body: JSON.stringify({ token, refreshToken })
+      }).catch(err => logger.error(`Error syncing token to backend: ${err instanceof Error ? err.message : String(err)}`));
     }
   }
 
@@ -69,6 +72,30 @@ class SyncService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairs })
+      });
+    }
+  }
+
+  public async getLocalTree(pairId: string, relPath = ''): Promise<any> {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getLocalTree(pairId, relPath);
+    } else {
+      return backendFetch(`/api/local/dir`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairId, relPath })
+      }).then(r => r.json());
+    }
+  }
+
+  public async resetDatabase(): Promise<void> {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      await this.localEngine?.resetDatabase();
+    } else {
+      await backendFetch('/api/sync/reset-db', {
+        method: 'POST'
       });
     }
   }
@@ -115,7 +142,7 @@ class SyncService {
           return data.result;
         }
       } catch (err) {
-        console.error('Error al solicitar limpieza de duplicados al backend:', err);
+        logger.error(`Error al solicitar limpieza de duplicados al backend: ${err instanceof Error ? err.message : String(err)}`);
       }
       return null;
     }
@@ -161,7 +188,7 @@ class SyncService {
   public async dismissAlert(drivePath: string) {
     if (this.isNative) {
       await this.ensureNativeEngine();
-      console.warn('[SyncService] dismissAlert no implementado en nativo');
+      logger.warn('dismissAlert no implementado en nativo');
     } else {
       await backendFetch('/api/sync/dismiss-alert', {
         method: 'POST',
@@ -177,7 +204,7 @@ class SyncService {
       // Fix #5: Implementar resolución de conflictos en nativo
       const conflict = this.localEngine?.getStatus().pendingConflicts?.find((c: any) => c.id === conflictId);
       if (!conflict) {
-        console.warn('[SyncService] Conflicto no encontrado:', conflictId);
+        logger.warn(`Conflicto no encontrado: ${conflictId}`);
         return null;
       }
       // Usar el backend HTTP como proxy para resolver el conflicto (el PC tiene acceso a Drive)
@@ -186,7 +213,7 @@ class SyncService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conflictId, resolution })
       }).then(r => r.json()).catch(err => {
-        console.error('[SyncService] Error resolviendo conflicto en PC:', err);
+        logger.error(`Error resolviendo conflicto en PC: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
     } else {
@@ -202,13 +229,13 @@ class SyncService {
     if (this.isNative) {
       await this.ensureNativeEngine();
       // Fix #5: Delegar al backend del PC para deshidratar (liberar espacio)
-      console.log('[SyncService] Delegando dehydrate al PC...');
+      logger.info('Delegando dehydrate al PC...');
       return await backendFetch('/api/sync/dehydrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
       }).then(r => r.json()).catch(err => {
-        console.error('[SyncService] Error delegando dehydrate:', err);
+        logger.error(`Error delegando dehydrate: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
     } else {
@@ -224,13 +251,13 @@ class SyncService {
     if (this.isNative) {
       await this.ensureNativeEngine();
       // Fix #5: Delegar al backend del PC para hidratar (descargar offline)
-      console.log('[SyncService] Delegando hydrate al PC...');
+      logger.info('Delegando hydrate al PC...');
       return await backendFetch('/api/sync/hydrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairId })
       }).then(r => r.json()).catch(err => {
-        console.error('[SyncService] Error delegando hydrate:', err);
+        logger.error(`Error delegando hydrate: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       });
     } else {

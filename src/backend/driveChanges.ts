@@ -52,6 +52,7 @@ interface ChangesListResponse {
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const MAX_ATTEMPTS = 3;
 const MAX_BACKOFF_MS = 32_000;
+const MAX_CHANGES_PAGES = 1_000;
 
 function retryAfterMs(value: string | null): number | undefined {
   if (!value) return undefined;
@@ -98,6 +99,9 @@ export class DriveChangesIngestor {
     let appliedChanges = 0;
 
     while (nextToken) {
+      if (pageCount >= MAX_CHANGES_PAGES) {
+        throw new Error(`Drive changes pagination exceeded ${MAX_CHANGES_PAGES} pages; aborting before cursor commit`);
+      }
       const data = await this.listChanges(options, nextToken);
       pageCount++;
       for (const change of data.changes ?? []) {

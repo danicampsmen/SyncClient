@@ -4,6 +4,38 @@ import os from "os";
 import fs from "fs/promises";
 import fsSync from "fs";
 import crypto from "crypto";
+
+// Cargar variables de .env para el proceso del servidor
+// (tsx/Node.js no carga .env automáticamente como Vite lo hace para el frontend)
+try {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (fsSync.existsSync(envPath)) {
+    const envContent = fsSync.readFileSync(envPath, 'utf8');
+    for (const line of envContent.split('\n')) {
+      const match = line.match(/^([^#=\s][^=]*)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim();
+        if (!process.env[key]) process.env[key] = value;
+      }
+    }
+  }
+} catch {
+  // Ignorar errores de lectura de .env
+}
+
+try {
+  // Habilitar Persistent HTTP Connections (Keep-Alive) para acelerar ráfagas de fetch
+  const { Agent, setGlobalDispatcher } = require('undici');
+  setGlobalDispatcher(new Agent({
+    keepAliveTimeout: 30000,     // 30 segundos
+    keepAliveMaxTimeout: 60000,  // 1 minuto máximo
+    connections: 50              // 50 conexiones concurrentes por host
+  }));
+} catch (e) {
+  // Si undici no está disponible en este entorno, ignorar
+}
+
 import { syncEngine } from "./src/backend/syncEngine";
 import { Logger } from "./src/backend/logger";
 
@@ -41,7 +73,12 @@ function isPathAllowed(targetPath: string): boolean {
       !path.isAbsolute(relative)
     );
   };
-  const allowedBases = ALLOWED_BASE_DIRS.flatMap((base) => {
+
+  // FINDING-17 fix: incluir rutas locales de pares configurados activamente
+  const activePairPaths = syncEngine.getStatus().pairs.map((p: any) => path.resolve(p.localPath)).filter(Boolean);
+  const dynamicAllowedBases = [...ALLOWED_BASE_DIRS, ...activePairPaths];
+
+  const allowedBases = dynamicAllowedBases.flatMap((base) => {
     let candidate = path.resolve(base);
     const missingSegments: string[] = [];
     try {
@@ -83,6 +120,7 @@ function isPathAllowed(targetPath: string): boolean {
 
   return allowedBases.some((base) => isWithin(resolved, base));
 }
+
 
 /** Valida que un valor sea un string no vacío y de longitud razonable */
 function isValidString(val: any, maxLength = 4096): val is string {
@@ -230,7 +268,7 @@ async function startServer() {
     // El navegador de Android no comparte cookies con el WebView de la app.
     // El state de alta entropía es el único permiso para entregar el code al relay;
     // la lectura posterior sigue exigiendo la sesión local de la app.
-    if (req.path === '/session/bootstrap' || req.path === '/oauth/callback' ||
+    if (req.path === '/health' || req.path === '/session/bootstrap' || req.path === '/oauth/callback' ||
       (req.path === '/oauth/token' && req.method === 'POST')) return next();
     const sessionId = getSessionId(req);
     const session = sessionId ? sessions.get(sessionId) : undefined;
@@ -410,6 +448,16 @@ async function startServer() {
       res.json({ success: true, status: syncEngine.getStatus() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/sync/reset-db", async (req, res) => {
+    if (!syncEngine) return res.status(500).json({ error: "No sync engine" });
+    try {
+      await syncEngine.resetDatabase();
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }
   });
 
