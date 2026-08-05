@@ -88,8 +88,8 @@ export class SyncEngine {
   private pendingConflicts: PendingConflict[] = [];
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
-  private googleClientId: string = process.env.GOOGLE_CLIENT_ID || '';
-  private googleClientSecret: string = process.env.GOOGLE_CLIENT_SECRET || '';
+  private googleClientId: string = process.env.VITE_FIREBASE_OAUTH_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '';
+  private googleClientSecret: string = process.env.VITE_FIREBASE_OAUTH_CLIENT_SECRET || process.env.VITE_GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || '';
   private configDir = path.join(os.homedir(), '.config', 'syncclient');
   private configFile = path.join(this.configDir, 'sync_data.json');
 
@@ -105,6 +105,7 @@ export class SyncEngine {
   private detectedExternalDrives: ExternalDriveAlert[] = [];
   private externalMonitorInterval: NodeJS.Timeout | null = null;
   private driveFolderCache = new Map<string, { timestamp: number; files: DriveFile[] }>();
+  private pairRootRemoteFolderId = new Map<string, string>();
 
   // --- v2: Database-backed state ---
   private db: IStorageBackend | null = null;
@@ -517,14 +518,28 @@ export class SyncEngine {
     };
 
     try {
-      const changes: DriveChange[] = [];
-      const result = await ingestor.ingest(options, change => {
+      let changes: DriveChange[] = [];
+      let result = await ingestor.ingest(options, change => {
         this.applyDriveChange(pair.id, change);
         changes.push(change);
       });
+
+      let attempts = 0;
+      // Mitigación de consistencia eventual: Si el trigger es un webhook y no hay cambios, reintentar hasta 3 veces.
+      while (changes.length === 0 && this.syncTriggerSource[pair.id] === 'webhook' && attempts < 3) {
+        this.logger.info(`[DriveChanges] Webhook recibido pero 0 cambios detectados. Esperando 3s (Intento ${attempts + 1}/3)...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        changes = [];
+        result = await ingestor.ingest(options, change => {
+          this.applyDriveChange(pair.id, change);
+          changes.push(change);
+        });
+        attempts++;
+      }
+
       this.driveCursorRescans.delete(pair.id);
       this.driveChangesCacheReady.add(pair.id);
-      this.logger.info(`[DriveChanges] pair=${pair.id} pages=${result.pageCount} changes=${result.appliedChanges}`);
+      this.logger.info(`[DriveChanges] pair=${pair.id} pages=${result.pageCount} changes=${result.appliedChanges} (after ${attempts} retries)`);
       return { pageToken: result.pageToken, controlledRescan: forceRescan, changes };
     } catch (error) {
       if (error instanceof DriveCursorRescanRequiredError) {
@@ -628,13 +643,10 @@ export class SyncEngine {
               
               if (this.activeSyncs.has(pair.id) || this.interruptRequested[pair.id]) {
                 if (!this.ensureInterrupt(pair.id)) continue;
-                this.logger.info(`[Webhooks] Cambio remoto detectado durante sync para el par ${pair.id}. Programando resync inmediato.`);
-                this.pendingResync.add(pair.id);
-                this.interruptRequested[pair.id] = { eventTimestamp: event.timestamp };
-                if (this.debounceTimers[pair.id]) {
-                  clearTimeout(this.debounceTimers[pair.id]);
-                  delete this.debounceTimers[pair.id];
-                }
+                this.logger.info(`[Webhooks] Notificación de Drive recibida durante sync activo para ${pair.id}. Verificando origen...`);
+                this.executeFastSyncFromWebhook(pair).catch(e => {
+                  this.logger.error(`[Webhooks] Error verificando webhook concurrente:`, e instanceof Error ? e.message : String(e));
+                });
               } else {
                 this.logger.info(`[Webhooks] ¡Nuevo cambio en Google Drive! Iniciando actualización inmediata para el par ${pair.id}...`);
                 this.syncTriggerSource[pair.id] = 'webhook' as any;
@@ -766,6 +778,7 @@ export class SyncEngine {
   }
 
   public async setPairs(pairs: SyncPair[]) {
+    this.pairRootRemoteFolderId.clear();
     this.pairs = pairs.map(p => ({ ...p, localPath: p.localPath.startsWith('~/') ? path.join(os.homedir(), p.localPath.slice(2)) : p.localPath }));
     await this.saveState();
     this.refreshWatchers();
@@ -823,7 +836,17 @@ export class SyncEngine {
       // Confiar en la versión local: subir el archivo local a Drive (actualización in place del remote existente)
       const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'upload', conflict.remoteFileId);
       try {
-        const uploaded = await this.uploadDriveBinary(pair.remotePath, fullLocalPath, conflict.remoteFileName, conflict.remoteFileId, undefined, operationId);
+        let parentId = await this.getPairRemoteFolderId(pair);
+        const dirname = path.dirname(conflict.localPath).replace(/\\/g, '/');
+        if (dirname !== '.' && dirname !== '') {
+          const parentState = this.db?.getFileState(pair.id, dirname);
+          if (parentState && parentState.remote_id) {
+            parentId = parentState.remote_id;
+          } else {
+            this.logger.warn(`[ResolveConflict] Carpeta padre no encontrada en DB para ${conflict.localPath}, subiendo a la raíz del par.`);
+          }
+        }
+        const uploaded = await this.uploadDriveBinary(parentId, fullLocalPath, conflict.remoteFileName, conflict.remoteFileId, undefined, operationId);
         this.markSelfWritten(fullLocalPath);
         if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
         const stats = await fs.stat(fullLocalPath);
@@ -1150,6 +1173,7 @@ export class SyncEngine {
       delete this.intervalRefs[pairId];
     }
     this.pairs = this.pairs.filter(p => p.id !== pairId);
+    this.pairRootRemoteFolderId.delete(pairId);
     delete this.manifests[pairId];
     this.pendingConflicts = this.pendingConflicts.filter(c => c.pairId !== pairId);
     await this.saveState();
@@ -1270,14 +1294,17 @@ export class SyncEngine {
                  return true;
                });
                if (relevantEvents.length === 0) return;
+               const pathMap = new Map<string, { relPath: string; localEvent: 'create' | 'update' | 'delete' }>();
+                for (const evt of relevantEvents) {
+                  const relPath = path.relative(pair.localPath, evt.path);
+                  pathMap.set(relPath, { relPath, localEvent: evt.type as 'create' | 'update' | 'delete' });
+                }
+                const targetPaths = Array.from(pathMap.values());
                this.pendingLocalEvents[pair.id] = (this.pendingLocalEvents[pair.id] || []).concat(
-                 relevantEvents.map(evt => ({
-                   relPath: path.relative(pair.localPath, evt.path),
-                   localEvent: evt.type as 'create' | 'update' | 'delete'
-                 }))
+                 targetPaths
                );
                 this.logger.info(`[Watcher] Cambios locales detectados durante sync para el par ${pair.id}. Interrumpiendo el ciclo activo para procesarlos inmediatamente.`);
-                this.interruptRequested[pair.id] = true;
+                this.interruptRequested[pair.id] = { eventTimestamp: Date.now() };
                return;
              }
 
@@ -1300,11 +1327,13 @@ export class SyncEngine {
               if (this.debounceTimers[pair.id]) clearTimeout(this.debounceTimers[pair.id]);
               this.debounceTimers[pair.id] = setTimeout(() => {
                 this.logger.info(`[Watcher] Detectados ${relevantEvents.length} eventos locales para el par ${pair.id}. Iniciando Fast Sync...`);
-               const targetPaths = relevantEvents.map(evt => ({
-                 relPath: path.relative(pair.localPath, evt.path),
-                 localEvent: evt.type as 'create' | 'update' | 'delete'
-               }));
-               this.fastSync(pair, targetPaths).catch(e => {
+                const pathMap = new Map<string, { relPath: string; localEvent: 'create' | 'update' | 'delete' }>();
+                for (const evt of relevantEvents) {
+                  const relPath = path.relative(pair.localPath, evt.path);
+                  pathMap.set(relPath, { relPath, localEvent: evt.type as 'create' | 'update' | 'delete' });
+                }
+                const targetPaths = Array.from(pathMap.values());
+                this.fastSync(pair, targetPaths).catch(e => {
                  this.logger.error(`[Watcher] Fast Sync falló para el par ${pair.id}:`, e instanceof Error ? e.message : String(e));
                  this.syncTriggerSource[pair.id] = 'fs-event' as any;
                  this.triggerSync(pair.id);
@@ -1366,7 +1395,30 @@ export class SyncEngine {
 
 
 
-  private async runSync(pair: SyncPair, pairLock: PairLock): Promise<void> {
+  private async getPairRemoteFolderId(pair: SyncPair): Promise<string> {
+    const cached = this.pairRootRemoteFolderId.get(pair.id);
+    if (cached) return cached;
+
+    let remoteFolderId = 'root';
+    let remotePathParts = pair.remotePath.replace(/^(RemoteServer|GoogleDrive|Drive):/, '').replace(/^[\/\\]+/, '').split('/').filter(Boolean);
+
+    if (pair.cloudCategory === 'computers' && remotePathParts[0] !== 'Ordenadores' && remotePathParts[0] !== 'Computers') {
+      const deviceLabel = pair.deviceName || os.hostname() || 'Dispositivo-Linux';
+      remotePathParts = ['Ordenadores', deviceLabel, ...remotePathParts];
+    }
+
+    for (const part of remotePathParts) {
+      const files = await this.listDriveFiles(remoteFolderId);
+      let folder = files.find(f => f.name === part && f.mimeType === 'application/vnd.google-apps.folder');
+      if (!folder) folder = await this.createDriveFolder(remoteFolderId, part);
+      remoteFolderId = folder.id;
+    }
+
+    this.pairRootRemoteFolderId.set(pair.id, remoteFolderId);
+    return remoteFolderId;
+  }
+
+  private async runSync(pair: SyncPair, pairLock: PairLock | null = null) {
     const pairId = pair.id;
 
     if (this.db) {
@@ -1379,20 +1431,7 @@ export class SyncEngine {
 
     let driveChangeBatch: { pageToken: string; controlledRescan: boolean } | null = null;
     try {
-      let remoteFolderId = 'root';
-      let remotePathParts = pair.remotePath.replace(/^(RemoteServer|GoogleDrive|Drive):/, '').replace(/^[\/\\]+/, '').split('/').filter(Boolean);
-
-      if (pair.cloudCategory === 'computers' && remotePathParts[0] !== 'Ordenadores' && remotePathParts[0] !== 'Computers') {
-        const deviceLabel = pair.deviceName || os.hostname() || 'Dispositivo-Linux';
-        remotePathParts = ['Ordenadores', deviceLabel, ...remotePathParts];
-      }
-
-      for (const part of remotePathParts) {
-        const files = await this.listDriveFiles(remoteFolderId);
-        let folder = files.find(f => f.name === part && f.mimeType === 'application/vnd.google-apps.folder');
-        if (!folder) folder = await this.createDriveFolder(remoteFolderId, part);
-        remoteFolderId = folder.id;
-      }
+      const remoteFolderId = await this.getPairRemoteFolderId(pair);
 
       await fs.mkdir(pair.localPath, { recursive: true });
 
@@ -1454,11 +1493,13 @@ export class SyncEngine {
       if (err instanceof Error && err.message !== 'WEBHOOK_INTERRUPT') {
         this.logger.error(`[SyncEngine] pair=${pairId} sync failed; recoverable state was retained:`, errMsg);
       }
-      this.addEvent({
-        id: Math.random().toString(36).slice(2, 11), pairId, filename: pair.localPath,
-        action: 'info', timestamp: Date.now(),
-        details: `Synchronization failed: ${err instanceof Error ? err.message : String(err)}`,
-      }, true);
+      if (err instanceof Error && err.message !== 'WEBHOOK_INTERRUPT') {
+        this.addEvent({
+          id: Math.random().toString(36).slice(2, 11), pairId, filename: pair.localPath,
+          action: 'info', timestamp: Date.now(),
+          details: `Synchronization failed: ${err instanceof Error ? err.message : String(err)}`,
+        }, true);
+      }
       await this.saveState();
     } finally {
       try {
@@ -1558,20 +1599,37 @@ export class SyncEngine {
 
     // Ingestar cambios de la API de Drive
     const changesResult = await this.ingestDriveChanges(pair);
-    if (!changesResult || !changesResult.changes.length) {
-      // Si no hay cambios detallados pero llegó notificación, forzar sync directo
-      this.logger.info(`[Webhooks] Evento de cambio recibido. Ejecutando Sincronización Directa para ${pair.id}...`);
+    if (!changesResult) {
+      this.logger.info(`[Webhooks] No se pudieron obtener detalles de Drive. Forzando Sincronización Directa para ${pair.id}...`);
+      if (this.activeSyncs.has(pair.id) && this.ensureInterrupt(pair.id)) {
+        this.interruptRequested[pair.id] = { eventTimestamp: Date.now() };
+      }
       this.triggerSync(pair.id);
+      return;
+    }
+    if (changesResult.changes.length === 0) {
+      this.logger.debug(`[Webhooks] Webhook recibido pero no hay cambios nuevos (pageToken ya consumido). Ignorando.`);
       return;
     }
 
     const targetPaths: { relPath: string; change: DriveChange }[] = [];
     let requiresFullSync = false;
+    let hasRealExternalChanges = false;
 
     for (const change of changesResult.changes) {
       if (change.fileId) {
         const state = this.db.getFileStateByRemoteId(pair.id, change.fileId);
         const df = change.file as unknown as DriveFile | undefined;
+
+        if (state && df && df.modifiedTime) {
+          const changeTime = new Date(df.modifiedTime).getTime();
+          if (changeTime <= state.remote_mtime) {
+             this.logger.debug(`[Webhooks] Ignorando cambio en ${state.rel_path} porque ya está sincronizado localmente.`);
+             continue;
+          }
+        }
+        
+        hasRealExternalChanges = true;
 
         if (state) {
           // El archivo ya existe en la base de datos local
@@ -1600,6 +1658,11 @@ export class SyncEngine {
       }
     }
 
+    if (!hasRealExternalChanges) {
+       this.logger.debug(`[Webhooks] Todos los cambios del lote fueron originados por nosotros. Ignorando.`);
+       return;
+    }
+
     // Si logramos mapear las rutas y no requerimos resync completo
     if (targetPaths.length > 0 && !requiresFullSync) {
       this.logger.info(`[FastSync] Descargando/Actualizando inmediatamente ${targetPaths.length} archivo(s) en el par ${pair.id}.`);
@@ -1619,7 +1682,23 @@ export class SyncEngine {
     
     this.logger.info(`[FastSync] Paths a sincronizar: ${targetPaths.map(t => `${t.relPath} (${t.change ? 'remote' : 'local'})`).join(', ')}`);
 
-    for (const { relPath, change, localEvent } of targetPaths) {
+    let pairLock: PairLock | null = null;
+    try {
+      pairLock = await acquirePairLock(this.sharedPairLockDirectory(), pair.id);
+    } catch (err: unknown) {
+      if (err instanceof PairAlreadyRunningError) {
+        this.logger.warn(`[FastSync] pair=${pair.id} is already active; work remains queued or will fail.`);
+      } else {
+        this.logger.error(`[FastSync] pair=${pair.id} lock acquisition failed:`, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    try {
+      if (!pair.progress) {
+        pair.progress = { currentFile: 'Iniciando Sincronización Rápida...', totalFiles: targetPaths.length, currentFileIndex: 0, bytesTransferred: 0, totalBytes: 0, percentage: 0, action: 'comprobando' };
+      }
+      for (const { relPath, change, localEvent } of targetPaths) {
       const lockKey = `${pair.id}:${relPath}`;
       if (this.activeTransfers.has(lockKey)) {
         this.logger.info(`[FastSync] Path ${relPath} ya se está transfiriendo, omitiendo...`);
@@ -1633,15 +1712,30 @@ export class SyncEngine {
         if (change) {
           // --- REMOTE CHANGE PROCESSING ---
           if (change.removed) {
-             try { await fs.unlink(fullLocalPath); } catch (e) { /* ignore */ }
-             this.db.deleteFileState(pair.id, relPath);
-             this.logger.info(`[FastSync] Deleted local file ${relPath} (removed remotely)`);
+             this.markSelfWritten(fullLocalPath);
+             try {
+               await fs.rm(fullLocalPath, { recursive: true, force: true });
+             } catch (e) {
+               this.logger.warn(`[FastSync] Could not physically remove ${fullLocalPath}:`, e);
+             }
+             this.db.deleteFolderStateCascade(pair.id, relPath);
+             this.logger.info(`[FastSync] Deleted local file/directory ${relPath} (removed remotely)`);
              continue;
           }
 
           const remoteFile = change.file as unknown as DriveFile;
           if (remoteFile.mimeType === 'application/vnd.google-apps.folder') {
-             try { await fs.mkdir(fullLocalPath, { recursive: true }); } catch (e) { /* ignore */ }
+             try {
+               this.markSelfWritten(fullLocalPath);
+               await fs.mkdir(fullLocalPath, { recursive: true });
+               const newStat = await fs.stat(fullLocalPath);
+               this.db.setFileState(pair.id, relPath, {
+                 pair_id: pair.id, rel_path: relPath, remote_id: remoteFile.id,
+                 local_mtime: newStat.mtimeMs, remote_mtime: new Date(remoteFile.modifiedTime).getTime(),
+                 file_size: null, md5_hash: null, block_hashes: null,
+                 vector_clock: '{}', device_id: this.DEVICE_ID || '', etag: null, updated_at: Date.now(), is_tombstone: 0
+               });
+             } catch (e) { /* ignore */ }
              this.logger.info(`[FastSync] Created local directory ${relPath}`);
              continue;
           }
@@ -1676,34 +1770,70 @@ export class SyncEngine {
           const state = this.db.getFileState(pair.id, relPath);
           if (localEvent === 'delete') {
             if (state && state.remote_id) {
-              this.logger.info(`[FastSync] Deleting remote file ${relPath}`);
-              await this.deleteDriveFile(state.remote_id);
-              this.db.setFileState(pair.id, relPath, { ...state, is_tombstone: 1, updated_at: Date.now() });
+              this.logger.info(`[FastSync] Deleting remote file/directory ${relPath}`);
+              try {
+                await this.deleteDriveFile(state.remote_id);
+              } catch (delError: any) {
+                if (delError.message && delError.message.includes('404')) {
+                  this.logger.warn(`[FastSync] Remote element ${state.remote_id} already deleted (404). Proceeding with local tombstone.`);
+                } else {
+                  throw delError;
+                }
+              }
+              this.db.deleteFolderStateCascade(pair.id, relPath);
               this.addEvent({ id: Math.random().toString(36).substr(2, 9), pairId: pair.id, filename: path.basename(relPath), action: 'deleted', timestamp: Date.now() }, true);
             }
           } else {
             let localStat = null;
             try { localStat = await fs.stat(fullLocalPath); } catch (e) { /* ignore */ }
-            if (localStat && localStat.isFile()) {
-              this.logger.info(`[FastSync] Uploading local file ${relPath}`);
-              let remoteFolderId = 'root'; // Simplified. In reality, we should resolve the parent's remoteFolderId!
-              // Try to find parent's remote ID if not root
+            if (localStat && localStat.isDirectory()) {
+              let remoteFolderId = await this.getPairRemoteFolderId(pair);
+
               const parentDir = path.dirname(relPath);
               if (parentDir && parentDir !== '.') {
                 const parentState = this.db.getFileState(pair.id, parentDir);
-                if (parentState && parentState.remote_id) remoteFolderId = parentState.remote_id;
-                else {
+                if (parentState && parentState.remote_id) {
+                  remoteFolderId = parentState.remote_id;
+                } else {
                   this.logger.warn(`[FastSync] Parent folder ${parentDir} not found in DB. Falling back to full resync.`);
                   this.pendingResync.add(pair.id);
                   continue;
                 }
-              } else {
-                // To safely resolve root without a huge scan, let's just queue resync for files at the root if we don't have remoteFolderId cached
-                // Wait, pair.remotePath is known. We'd have to resolve it. Since fastSync is an optimization, falling back is fine!
-                // Actually, if state exists, we already have state.remote_id, so uploadDriveBinary will just overwrite it, parent ID doesn't matter much for update!
-                if (!state?.remote_id) {
-                   this.pendingResync.add(pair.id);
-                   continue;
+              }
+
+              try {
+                let createdFolder: DriveFile;
+                if (state && state.remote_id) {
+                  this.logger.info(`[FastSync] Folder ${relPath} already exists in DB. Skipping remote creation.`);
+                  createdFolder = { id: state.remote_id, modifiedTime: new Date().toISOString() } as DriveFile;
+                } else {
+                  this.logger.info(`[FastSync] Creating remote folder ${relPath}`);
+                  createdFolder = await this.createDriveFolder(remoteFolderId, path.basename(relPath));
+                }
+                const newStat = await fs.stat(fullLocalPath);
+                this.db.setFileState(pair.id, relPath, {
+                  pair_id: pair.id, rel_path: relPath, remote_id: createdFolder.id,
+                  local_mtime: newStat.mtimeMs, remote_mtime: new Date(createdFolder.modifiedTime || Date.now()).getTime(),
+                  file_size: null, md5_hash: null, block_hashes: null,
+                  vector_clock: '{}', device_id: this.DEVICE_ID || '', etag: null, updated_at: Date.now(), is_tombstone: 0
+                });
+                this.addEvent({ id: Math.random().toString(36).substr(2, 9), pairId: pair.id, filename: path.basename(relPath), action: 'uploaded', timestamp: Date.now() }, true);
+              } catch (err: any) {
+                this.logger.error(`[FastSync] Folder creation failed for ${relPath}:`, err);
+              }
+            } else if (localStat && localStat.isFile()) {
+              this.logger.info(`[FastSync] Uploading local file ${relPath}`);
+              let remoteFolderId = await this.getPairRemoteFolderId(pair);
+
+              const parentDir = path.dirname(relPath);
+              if (parentDir && parentDir !== '.') {
+                const parentState = this.db.getFileState(pair.id, parentDir);
+                if (parentState && parentState.remote_id) {
+                  remoteFolderId = parentState.remote_id;
+                } else {
+                  this.logger.warn(`[FastSync] Parent folder ${parentDir} not found in DB. Falling back to full resync.`);
+                  this.pendingResync.add(pair.id);
+                  continue;
                 }
               }
               const operationId = this.beginTransferOperation(pair.id, relPath, 'upload', state?.remote_id || null);
@@ -1736,6 +1866,9 @@ export class SyncEngine {
       this.pendingResync.delete(pair.id);
       this.logger.info(`[FastSync] Se detectaron cambios locales que requieren resync completo para ${pair.id}. Ejecutando Sincronización Inmediata...`);
       this.triggerSync(pair.id);
+    }
+    } finally {
+      await pairLock.release();
     }
   }
 
@@ -2264,17 +2397,46 @@ export class SyncEngine {
       checkInterrupt();
       const subDir = path.join(localDir, dirName);
       const subPrefix = path.join(relativePrefix, dirName);
-      const subRemoteFolder = subDirs.find(d => d.name === dirName);
-      if (subRemoteFolder) {
+      let subRemoteFolder = subDirs.find(d => d.name === dirName);
+
+      if (!subRemoteFolder) {
         try {
-          await fs.mkdir(subDir, { recursive: true });
+          this.logger.info(`[SyncEngine] Creando carpeta remota en Drive: ${subPrefix}`);
+          subRemoteFolder = await this.createDriveFolder(remoteFolderId, dirName);
         } catch (error) {
-          this.logger.error(`Could not create local directory ${subDir}; keeping its work recoverable:`, error instanceof Error ? error.message : String(error));
+          this.logger.error(`No se pudo crear la carpeta remota ${subPrefix}:`, error instanceof Error ? error.message : String(error));
+          hadFailures = true;
           continue;
         }
-        const childCompleted = await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix);
-        if (!childCompleted) hadFailures = true;
       }
+
+      try {
+        this.markSelfWritten(subDir);
+        await fs.mkdir(subDir, { recursive: true });
+        const subStat = await fs.stat(subDir);
+        updates.set(subPrefix.replace(/\\/g, '/'), {
+          pair_id: pair.id,
+          rel_path: subPrefix.replace(/\\/g, '/'),
+          remote_id: subRemoteFolder.id,
+          local_mtime: subStat.mtimeMs,
+          remote_mtime: subRemoteFolder.modifiedTime ? new Date(subRemoteFolder.modifiedTime).getTime() : Date.now(),
+          file_size: null,
+          md5_hash: null,
+          block_hashes: null,
+          vector_clock: '{}',
+          device_id: this.DEVICE_ID,
+          etag: null,
+          updated_at: Date.now(),
+          is_tombstone: 0,
+        });
+      } catch (error) {
+        this.logger.error(`Could not create or stat local directory ${subDir}:`, error instanceof Error ? error.message : String(error));
+        hadFailures = true;
+        continue;
+      }
+
+      const childCompleted = await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix);
+      if (!childCompleted) hadFailures = true;
     }
 
     if (hadFailures) {
@@ -2497,6 +2659,7 @@ export class SyncEngine {
 
   public async resetDatabase(): Promise<void> {
     this.logger.warn('[SyncEngine] Resetting database...');
+    this.pairRootRemoteFolderId.clear();
     for (const pair of this.pairs) {
       if (pair.status === 'syncing') {
         pair.status = 'paused';
