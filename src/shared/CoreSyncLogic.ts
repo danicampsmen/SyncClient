@@ -61,11 +61,6 @@ export interface SyncPlan {
     remoteId: string;
     localPath: string; // <-- AÑADIDO: Permite mostrar el nombre real en la interfaz
   }>;
-  adoptions: Array<{
-    localPath: string;
-    remoteFile: RemoteEntry;
-    vectorClock: string;
-  }>;
   conflicts: Array<{
     localPath: string;
     remoteFile: RemoteEntry;
@@ -255,7 +250,6 @@ export class CoreSyncLogic {
       downloads: [],
       deleteLocal: [],
       deleteRemote: [],
-      adoptions: [],
       conflicts: []
     };
 
@@ -286,14 +280,15 @@ export class CoreSyncLogic {
 
       if (!dbEntry) {
         if (remoteEntry) {
-          // Archivo nuevo localmente pero ya existe remotamente (posible adopción)
-          plan.adoptions.push({
+          // Archivo nuevo localmente pero ya existe remotamente — subir preservando el remoteId
+          plan.uploads.push({
             localPath: localEntry.rawName || relPath,
-            remoteFile: remoteEntry,
+            remoteName: localEntry.name,
+            remoteId: remoteEntry.id,
             vectorClock: JSON.stringify({ [deviceId]: 1 })
           });
         } else {
-          // Nuevo archivo local — subir
+          // Nuevo archivo local — subir sin remoteId
           plan.uploads.push({
             localPath: localEntry.rawName || relPath,
             remoteName: localEntry.name,
