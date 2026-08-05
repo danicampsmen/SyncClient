@@ -1,17 +1,24 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { refreshAccessToken } from './auth';
 import { SecureStore } from './utils/secureStore';
 
 describe('auth.refreshAccessToken', () => {
   let originalFetch: typeof fetch;
+  let refreshAccessToken: () => Promise<string | null>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalFetch = (globalThis as any).fetch;
+    // Definir window para evitar errores en módulos que lo consultan
+    (globalThis as any).window = (globalThis as any).window || {};
+    // Importar el módulo dinámicamente después de preparar el entorno
+    const mod = await import('./auth');
+    refreshAccessToken = mod.refreshAccessToken;
   });
 
   afterEach(() => {
     (globalThis as any).fetch = originalFetch;
     vi.restoreAllMocks();
+    // limpiar window creado
+    try { delete (globalThis as any).window; } catch { (globalThis as any).window = undefined; }
   });
 
   it('renueva el token usando refresh_token almacenado', async () => {
