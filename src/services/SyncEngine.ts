@@ -555,8 +555,6 @@ export class SyncEngine {
   private async v2SyncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = '') {
     if (!this.db || !this.DEVICE_ID) return;
 
-    await this.reconcileWithHttp304(pair.id, remoteFolderId);
-
     const dbState = this.db.getFolderState(pair.id);
     const scanResult = await scanChanges(localDir, dbState, this.fs, pair.id);
     if (scanResult === 'PERMISSION_DENIED') {
@@ -663,6 +661,7 @@ export class SyncEngine {
         this.markSelfWritten(fullLocalPath);
         await this.fs.rm(fullLocalPath).catch(() => { });
         await this.removeSyncmeta(fullLocalPath);
+        this.db.deleteFolderStateCascade(pair.id, del.localPath);
         this.db.journalDone(journalId);
         this.addEvent({
           id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
@@ -678,6 +677,7 @@ export class SyncEngine {
       const journalId = this.db.journalStart(pair.id, 'delete_remote_start', del.localPath, del.remoteId);
       try {
         await this.deleteDriveFile(del.remoteId, remoteFolderId);
+        this.db.deleteFolderStateCascade(pair.id, del.localPath);
         this.db.journalDone(journalId);
         this.addEvent({
           id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
@@ -686,6 +686,7 @@ export class SyncEngine {
       } catch (e: any) {
         this.db.journalFail(journalId);
         if (e.message?.includes('404') || e.message?.includes('File not found')) {
+          this.db.deleteFolderStateCascade(pair.id, del.localPath);
           this.db.journalDone(journalId);
         }
       }
@@ -755,48 +756,6 @@ export class SyncEngine {
 
     if (updates.size > 0) this.db.updateBatch(pair.id, updates);
     this.db.vacuum();
-  }
-
-  private async reconcileWithHttp304(pairId: string, remoteFolderId: string): Promise<void> {
-    if (!this.db || !this.accessToken) return;
-    const dbState = this.db.getFolderState(pairId);
-    const pendingDeletes: string[] = [];
-
-    for (const [relPath, state] of dbState) {
-      if (!state.remote_id || state.is_tombstone) continue;
-      try {
-        const modifiedSince = state.remote_mtime ? new Date(state.remote_mtime).toUTCString() : undefined;
-        const headers: Record<string, string> = { Authorization: `Bearer ${this.accessToken}` };
-        if (modifiedSince) headers['If-Modified-Since'] = modifiedSince;
-
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${state.remote_id}?fields=modifiedTime,md5Checksum,size`, {
-          method: 'GET', headers
-        });
-
-        if (res.status === 304) continue;
-        if (res.status === 404) { pendingDeletes.push(relPath); continue; }
-        if (res.status === 401) throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
-
-        if (res.ok) {
-          const data = await res.json();
-          const updatedState: FileState = {
-            ...state, remote_mtime: new Date(data.modifiedTime).getTime(),
-            md5_hash: data.md5Checksum || state.md5_hash, file_size: data.size ? parseInt(data.size, 10) : state.file_size,
-            updated_at: Date.now()
-          };
-          this.db.setFileState(pairId, relPath, updatedState);
-        }
-      } catch (e: any) { }
-    }
-
-    for (const relPath of pendingDeletes) {
-      const state = this.db.getFileState(pairId, relPath);
-      if (state) {
-        state.is_tombstone = 1;
-        state.updated_at = Date.now();
-        this.db.setFileState(pairId, relPath, state);
-      }
-    }
   }
 
   private addEvent(ev: SyncEvent, skipSave = false) {

@@ -136,4 +136,36 @@ describe('SQLiteBackend Phase 1 persistence', () => {
         expect(backend.getPendingJournalEntries('pair-1')).toHaveLength(0);
         expect(backend.getRecoverableOperations('pair-1')).toHaveLength(0);
     });
+
+    it('cascades rename and delete operations across nested folder structures', async () => {
+        const directory = await mkdtemp(path.join(os.tmpdir(), 'syncclient-storage-'));
+        temporaryDirectories.push(directory);
+        const backend = new SQLiteBackend(directory);
+        await backend.init();
+
+        const folderState: FileState = {
+            pair_id: 'pair-1', rel_path: 'FolderA', remote_id: 'remote-folder-1',
+            local_mtime: Date.now(), remote_mtime: Date.now(), file_size: null, md5_hash: null,
+            block_hashes: null, vector_clock: '{}', device_id: 'device-1', etag: null, updated_at: Date.now(), is_tombstone: 0
+        };
+        const childState: FileState = {
+            pair_id: 'pair-1', rel_path: 'FolderA/SubFolderB/file.txt', remote_id: 'remote-file-1',
+            local_mtime: Date.now(), remote_mtime: Date.now(), file_size: 100, md5_hash: 'hash-1',
+            block_hashes: null, vector_clock: '{}', device_id: 'device-1', etag: null, updated_at: Date.now(), is_tombstone: 0
+        };
+
+        backend.setFileState('pair-1', 'FolderA', folderState);
+        backend.setFileState('pair-1', 'FolderA/SubFolderB/file.txt', childState);
+
+        // Test rename cascade
+        backend.renameFolderStateCascade('pair-1', 'FolderA', 'FolderRenamed');
+        expect(backend.getFileState('pair-1', 'FolderA')).toBeNull();
+        expect(backend.getFileState('pair-1', 'FolderRenamed')?.remote_id).toBe('remote-folder-1');
+        expect(backend.getFileState('pair-1', 'FolderRenamed/SubFolderB/file.txt')?.remote_id).toBe('remote-file-1');
+
+        // Test delete cascade
+        backend.deleteFolderStateCascade('pair-1', 'FolderRenamed');
+        expect(backend.getFileState('pair-1', 'FolderRenamed')?.is_tombstone).toBe(1);
+        expect(backend.getFileState('pair-1', 'FolderRenamed/SubFolderB/file.txt')?.is_tombstone).toBe(1);
+    });
 });

@@ -42,6 +42,10 @@ export interface IStorageBackend {
         operationIds: string[],
     ): void;
 
+    // Operaciones en cascada para carpetas anidadas
+    renameFolderStateCascade(pairId: string, oldRelPath: string, newRelPath: string): void;
+    deleteFolderStateCascade(pairId: string, folderRelPath: string): void;
+
     // Dispositivos
     getDeviceInfo(deviceId: string): DeviceInfo | null;
     setDeviceInfo(deviceId: string, info: DeviceInfo): void;
@@ -507,6 +511,63 @@ export class SQLiteBackend implements IStorageBackend {
         }
     }
 
+    renameFolderStateCascade(pairId: string, oldRelPath: string, newRelPath: string): void {
+        const now = Date.now();
+        const oldLen = oldRelPath.length + 1;
+        const newPrefix = newRelPath.endsWith('/') ? newRelPath : `${newRelPath}/`;
+
+        const action = () => {
+            const folderState = this.getFileState(pairId, oldRelPath);
+            if (folderState) {
+                this.deleteFileState(pairId, oldRelPath);
+                folderState.rel_path = newRelPath;
+                folderState.updated_at = now;
+                this.setFileState(pairId, newRelPath, folderState);
+            }
+
+            const query = `SELECT rel_path FROM file_states WHERE pair_id = ? AND rel_path LIKE ? || '/%'`;
+            const rows = isCapacitor()
+                ? this._wasmAll(this.db.prepare(query), [pairId, oldRelPath])
+                : this.db.prepare(query).all(pairId, oldRelPath);
+
+            for (const row of rows) {
+                const oldChildPath = row.rel_path as string;
+                const childState = this.getFileState(pairId, oldChildPath);
+                if (childState) {
+                    const subPath = oldChildPath.substring(oldLen);
+                    const newChildPath = `${newPrefix}${subPath}`;
+                    this.deleteFileState(pairId, oldChildPath);
+                    childState.rel_path = newChildPath;
+                    childState.updated_at = now;
+                    this.setFileState(pairId, newChildPath, childState);
+                }
+            }
+        };
+
+        if (isCapacitor()) {
+            this.db.run('BEGIN');
+            try { action(); this.db.run('COMMIT'); } catch (e) { this.db.run('ROLLBACK'); throw e; }
+        } else {
+            this.db.transaction(action)();
+        }
+    }
+
+    deleteFolderStateCascade(pairId: string, folderRelPath: string): void {
+        const now = Date.now();
+        if (isCapacitor()) {
+            this.db.run(
+                `UPDATE file_states SET is_tombstone = 1, updated_at = ? 
+                 WHERE pair_id = ? AND (rel_path = ? OR rel_path LIKE ? || '/%')`,
+                [now, pairId, folderRelPath, folderRelPath]
+            );
+        } else {
+            this.db.prepare(
+                `UPDATE file_states SET is_tombstone = 1, updated_at = ? 
+                 WHERE pair_id = ? AND (rel_path = ? OR rel_path LIKE ? || '/%')`
+            ).run(now, pairId, folderRelPath, folderRelPath);
+        }
+    }
+
     // ─── Devices ──────────────────────────────────────────────────
 
     getDeviceInfo(deviceId: string): DeviceInfo | null {
@@ -922,8 +983,44 @@ export class JSONBackend implements IStorageBackend {
         // Garbage collection
         const cutoff = now - 30 * 86400_000;
         for (const [key, val] of Object.entries(states)) {
-            if (val.is_tombstone && val.updated_at < cutoff) {
+            if (val.is_tombstone === 1 && val.updated_at < cutoff) delete states[key];
+        }
+        this.dirty = true;
+    }
+
+    renameFolderStateCascade(pairId: string, oldRelPath: string, newRelPath: string): void {
+        const states = this.getStates(pairId);
+        const now = Date.now();
+        const oldPrefix = `${oldRelPath}/`;
+        const newPrefix = `${newRelPath}/`;
+
+        for (const key of Object.keys(states)) {
+            const state = states[key];
+            if (key === oldRelPath) {
+                delete states[oldRelPath];
+                state.rel_path = newRelPath;
+                state.updated_at = now;
+                states[newRelPath] = state;
+            } else if (key.startsWith(oldPrefix)) {
                 delete states[key];
+                const subPath = key.substring(oldPrefix.length);
+                const newChildPath = `${newPrefix}${subPath}`;
+                state.rel_path = newChildPath;
+                state.updated_at = now;
+                states[newChildPath] = state;
+            }
+        }
+        this.dirty = true;
+    }
+
+    deleteFolderStateCascade(pairId: string, folderRelPath: string): void {
+        const states = this.getStates(pairId);
+        const now = Date.now();
+        const prefix = `${folderRelPath}/`;
+        for (const [key, state] of Object.entries(states)) {
+            if (key === folderRelPath || key.startsWith(prefix)) {
+                state.is_tombstone = 1;
+                state.updated_at = now;
             }
         }
         this.dirty = true;
