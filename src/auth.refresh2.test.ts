@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Set up environment and mocks before importing auth module
+// Mock firebase config before importing auth
 vi.mock('./config/firebaseConfig', () => ({
   getFirebaseClientConfig: () => ({
     apiKey: 'x', authDomain: 'x', projectId: 'x', storageBucket: 'x', messagingSenderId: 'x', appId: 'x', oAuthClientId: 'test-client-from-config.apps.googleusercontent.com'
   })
 }));
 
-// Mock SecureStore
+// Mock SecureStore module; we'll import it dynamically in beforeEach
 vi.mock('./utils/secureStore', () => ({
   SecureStore: {
     get: vi.fn(),
@@ -18,16 +18,28 @@ vi.mock('./utils/secureStore', () => ({
 
 let fetchMock: any;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.restoreAllMocks();
-  // Provide SecureStore mock implementations
-  const secure = require('./utils/secureStore').SecureStore;
-  secure.get.mockImplementation(async (key: string) => {
+  // Re-apply mocks
+  vi.mock('./config/firebaseConfig', () => ({
+    getFirebaseClientConfig: () => ({
+      apiKey: 'x', authDomain: 'x', projectId: 'x', storageBucket: 'x', messagingSenderId: 'x', appId: 'x', oAuthClientId: 'test-client-from-config.apps.googleusercontent.com'
+    })
+  }));
+
+  // Define a minimal global.window to satisfy imports that reference window
+  (global as any).window = (global as any).window || { electronBridge: { isElectron: false } };
+
+  // Provide SecureStore mock implementations via dynamic import
+  const secureMod = await import('./utils/secureStore');
+  secureMod.SecureStore.get = vi.fn(async (key: string) => {
     if (key === 'gdrive_refresh_token') return 'refresh-xyz';
     if (key === 'gdrive_access_token') return null;
     if (key === 'gdrive_token_expiry') return null;
     return null;
   });
+  secureMod.SecureStore.set = vi.fn();
+  secureMod.SecureStore.remove = vi.fn();
 
   // Mock global fetch to capture the request body
   fetchMock = vi.fn(async (url: string, init: any) => {
