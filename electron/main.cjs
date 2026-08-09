@@ -562,7 +562,7 @@ function updateTrayStatus(statusData) {
   } catch (e) { }
 
   if (togglePauseMenuItem) {
-    const targetLabel = isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar indefinidamente';
+    const targetLabel = isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar Sincronización';
     if (togglePauseMenuItem.label !== targetLabel) {
       togglePauseMenuItem.label = targetLabel;
     }
@@ -574,7 +574,7 @@ function createTray() {
   tray = new Tray(image);
 
   togglePauseMenuItem = new MenuItem({
-    label: '⏸️ Pausar indefinidamente',
+    label: '⏸️ Pausar Sincronización',
     click: () => sendActionToRenderer('toggle-pause-sync')
   });
 
