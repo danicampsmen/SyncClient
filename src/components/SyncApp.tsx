@@ -1087,9 +1087,11 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
             )}
             {isActivelySyncing && !isFinalizingDb && (
               <span className="text-amber-400 font-mono bg-amber-950/80 px-2.5 py-1 rounded-lg border border-amber-800/60 shadow-sm">
-                ⏱ {etaSeconds !== null 
-                  ? etaSeconds < 60 ? `${etaSeconds}s` : `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` 
-                  : 'ETA...'}
+                ⏱ {totalBytes > 0
+                  ? (etaSeconds !== null 
+                      ? etaSeconds < 60 ? `${etaSeconds}s` : `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` 
+                      : 'Calculando...')
+                  : 'Analizando...'}
               </span>
             )}
             <span className={`font-bold border px-2.5 py-1 rounded-lg text-xs sm:text-sm shadow-md ${
@@ -1183,7 +1185,9 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
           </div>
           <span className="text-neutral-300 font-medium truncate">
             {isActivelySyncing
-              ? `Sincronizando ${formatSize(safeTransferred)} de ${formatSize(totalBytes)}`
+              ? (totalBytes > 0
+                  ? `Sincronizando ${formatSize(safeTransferred)} de ${formatSize(totalBytes)}`
+                  : 'Escaneando árbol de directorios e identificando cambios...')
               : '✅ Todas las carpetas están al día y verificadas con Google Drive'}
           </span>
         </div>
@@ -1195,8 +1199,10 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
 function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null, status: SyncStatus, key?: string | number }) {
   if (status !== 'syncing' && !progress) return null;
 
-  // BUG-05 fix: 5% en lugar de 45% — más honesto durante la fase de escaneo inicial
-  const pct = progress ? progress.percentage : (status === 'syncing' ? 5 : 0);
+  // FIX VISUAL: Mostrar 5% durante la fase de análisis si el porcentaje es 0
+  const pct = progress 
+    ? (progress.percentage > 0 ? progress.percentage : (status === 'syncing' ? 5 : 0)) 
+    : (status === 'syncing' ? 5 : 0);
   const actionText = progress
     ? progress.action === 'subiendo' ? '🚀 Subiendo hacia Google Drive'
       : progress.action === 'descargando' ? '📥 Descargando a Dispositivo'
