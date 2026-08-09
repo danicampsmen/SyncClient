@@ -2454,7 +2454,8 @@ export class SyncEngine {
                 continue;
               }
               if (state && (state.file_size === 0 || state.file_size === null) && !state.md5_hash) {
-                this.logger.info(`[FastSync] Omitiendo borrado remoto directo de directorio ${canonicalRelPath}. Se procesará en sync completa.`);
+                this.logger.info(`[FastSync] Borrado de directorio detectado (${canonicalRelPath}). Programando sincronización de árbol...`);
+                setTimeout(() => this.triggerSync(pair.id), 100);
                 continue;
               }
               if (state && state.remote_id) {
@@ -2602,10 +2603,11 @@ export class SyncEngine {
       });
     }
 
-    // O(1) Batch Reconcile: Stage tombstones if they are missing from the definitive remote list.
+    // O(1) Batch Reconcile: Stage tombstones SOLO PARA ARCHIVOS (no carpetas)
     const tombstonesToWrite = new Map<string, FileState>();
     for (const [baseName, state] of dirDbState) {
-      if (state.remote_id && !state.is_tombstone) {
+      const isDirectoryEntry = (state.file_size === null || state.file_size === 0) && !state.md5_hash;
+      if (state.remote_id && !state.is_tombstone && !isDirectoryEntry) {
         const stillExists = remoteFiles.some(f => f.id === state.remote_id);
         if (!stillExists) {
           tombstonesToWrite.set(baseName, { ...state, is_tombstone: 1, updated_at: Date.now() });
@@ -2630,12 +2632,23 @@ export class SyncEngine {
     const plan = CoreSyncLogic.computeSyncPlan(localSnapshot, remoteSnapshot, dbStateForPlan, this.DEVICE_ID);
     checkInterrupt();
 
-    // Safeguard: Deletion Protection Guard (Gestión amigable sin excepciones colapsantes)
+    // Safeguard: Deletion Protection Guard (Agrupar borrados por raíz para no bloquear carpetas individuales)
     const deletionsCount = plan.deleteLocal.length + plan.deleteRemote.length;
     const totalKnownFiles = dbStateForPlan.size;
     const conflictId = `mass_del_${pair.id}`;
 
-    if (totalKnownFiles > 10 && (deletionsCount > 100 || (deletionsCount > 5 && deletionsCount / totalKnownFiles > 0.4))) {
+    const topLevelDeletedRoots = new Set<string>();
+    for (const del of [...plan.deleteLocal, ...plan.deleteRemote]) {
+      const rootSegment = del.localPath.split('/')[0];
+      topLevelDeletedRoots.add(rootSegment);
+    }
+
+    const isMassDeletion = totalKnownFiles > 10 && (
+      deletionsCount > 100 ||
+      (topLevelDeletedRoots.size > 5 && deletionsCount / totalKnownFiles > 0.4)
+    );
+
+    if (isMassDeletion) {
       const existingConflict = this.pendingConflicts.find(c => c.id === conflictId);
       if (existingConflict) {
         this.logger.info(`[SafetyGuard] Borrado masivo para ${pair.id} ya registrado previamente. Esperando resolución del usuario.`);
@@ -3177,6 +3190,12 @@ export class SyncEngine {
         dirNames.add(dir.name);
       }
     }
+    // Incluir carpetas registradas en SQLite para poder limpiar carpetas huérfanas
+    for (const [baseName, state] of dirDbState) {
+      if (state.remote_id && !state.is_tombstone && (state.file_size === null || state.file_size === 0) && !state.md5_hash) {
+        dirNames.add(baseName);
+      }
+    }
 
     for (const dirName of dirNames) {
       if ((pair.status as string) === 'paused') return false;
@@ -3187,37 +3206,61 @@ export class SyncEngine {
       const existsLocally = localDirs.some(d => d.isDirectory() && normalizeNFC(d.name) === normalizeNFC(dirName));
       const folderState = this.db.getFileState(pair.id, subPrefix);
 
-      if (subRemoteFolder) {
-        if (folderState && !existsLocally && folderState.is_tombstone !== 1) {
-          this.logger.info(`[SyncEngine] Carpeta local '${subPrefix}' fue eliminada. Borrando en Google Drive...`);
-          try {
-            await this.deleteDriveFile(subRemoteFolder.id, remoteFolderId);
-            this.invalidatePairRootCache(pair.id);
+      // Comprobar si la carpeta o alguno de sus subarchivos pertenecían a la BD local
+      const hasChildrenInDb = Array.from(dbState.keys()).some(
+        childPath => (childPath === subPrefix || childPath.startsWith(subPrefix + '/')) && dbState.get(childPath)?.is_tombstone !== 1
+      );
+      const isLocalFolderDeletion = !existsLocally && (hasChildrenInDb || (folderState && folderState.is_tombstone !== 1));
 
-            const prefix = subPrefix + '/';
-            const folderStateMap = this.db.getFolderState(pair.id);
-            for (const [childPath, childState] of folderStateMap) {
-              if (childPath === subPrefix || childPath.startsWith(prefix)) {
-                this.db.setFileState(pair.id, childPath, {
-                  ...childState,
-                  is_tombstone: 1,
-                  updated_at: now,
-                  local_mtime: now
-                });
-              }
+      // CASO A: Borrado local de carpeta que existe en Google Drive
+      if (subRemoteFolder && isLocalFolderDeletion) {
+        this.logger.info(`[SyncEngine] Carpeta local '${subPrefix}' fue eliminada. Borrando en Google Drive...`);
+        try {
+          await this.deleteDriveFile(subRemoteFolder.id, remoteFolderId);
+          this.invalidatePairRootCache(pair.id);
+
+          const prefix = subPrefix + '/';
+          const folderStateMap = this.db.getFolderState(pair.id);
+          for (const [childPath, childState] of folderStateMap) {
+            if (childPath === subPrefix || childPath.startsWith(prefix)) {
+              this.db.setFileState(pair.id, childPath, {
+                ...childState,
+                is_tombstone: 1,
+                updated_at: now,
+                local_mtime: now
+              });
             }
-
-            this.addEvent({
-              id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
-              filename: dirName, action: 'deleted', timestamp: Date.now(), details: 'Carpeta eliminada en Drive'
-            }, true);
-          } catch (error) {
-            this.logger.error(`[SyncEngine] Falló el borrado de la carpeta remota ${subPrefix}:`, error instanceof Error ? error.message : String(error));
-            hadFailures = true;
           }
-          continue;
-        }
 
+          this.addEvent({
+            id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
+            filename: dirName, action: 'deleted', timestamp: Date.now(), details: 'Carpeta eliminada en Drive'
+          }, true);
+        } catch (error) {
+          this.logger.error(`[SyncEngine] Falló el borrado de la carpeta remota ${subPrefix}:`, error instanceof Error ? error.message : String(error));
+          hadFailures = true;
+        }
+        continue;
+      }
+
+      // CASO B: Carpeta no existe localmente ni en Drive pero sigue viva en SQLite
+      if (!subRemoteFolder && !existsLocally && (hasChildrenInDb || folderState)) {
+        const prefix = subPrefix + '/';
+        const folderStateMap = this.db.getFolderState(pair.id);
+        for (const [childPath, childState] of folderStateMap) {
+          if (childPath === subPrefix || childPath.startsWith(prefix)) {
+            this.db.setFileState(pair.id, childPath, {
+              ...childState,
+              is_tombstone: 1,
+              updated_at: now
+            });
+          }
+        }
+        continue;
+      }
+
+      // CASO C: Carpeta existe en Drive y se mantiene o descarga localmente
+      if (subRemoteFolder) {
         this.markSelfWritten(subDir);
         if (!existsLocally) {
           try {
