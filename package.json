@@ -1,0 +1,93 @@
+{
+  "name": "syncclient",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "bin": {
+    "syncclient": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx server.ts",
+    "cli": "tsx src/cli/index.ts",
+    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --outfile=dist/cli.js && chmod +x dist/cli.js",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs && npm run build:cli",
+    "start": "npm run build && bash scripts/start-electron.sh",
+    "tray": "npm run build && electron . --no-sandbox --hidden",
+    "electron:dev": "kill-port 3000 && npm run build && concurrently \"npm run dev\" \"wait-on tcp:3000 && electron . --no-sandbox\"",
+    "electron:build": "npm run build && electron-builder",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "bash scripts/verify.sh",
+    "auth:logout": "bash scripts/logout.sh",
+    "android:build": "npm run build && npx cap copy android",
+    "android:open": "npm run android:build && cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew installDebug && cd .. && adb reverse tcp:3000 tcp:3000 && adb shell monkey -p com.syncclient.app -c android.intent.category.LAUNCHER 1"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/filesystem": "^8.1.2",
+    "@parcel/watcher": "^2.6.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "better-sqlite3": "^13.0.2",
+    "capacitor-secure-storage-plugin": "^0.13.0",
+    "express": "^4.21.2",
+    "firebase": "^12.17.0",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "sql.js": "^1.14.1",
+    "vite": "^6.2.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "@types/sql.js": "^1.4.11",
+    "concurrently": "^10.0.4",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
+    "kill-port": "^2.0.1",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3",
+    "vitest": "^4.1.10",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.syncclient.desktop",
+    "productName": "SyncClient",
+    "icon": "syncclient",
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "syncDesktopName": true
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ]
+  },
+  "author": {
+    "name": "Dani",
+    "email": "danicampsmen@gmail.com"
+  },
+  "description": "Google Drive Sync Client",
+  "homepage": "https://github.com/syncclient"
+}

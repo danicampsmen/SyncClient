@@ -1,0 +1,15 @@
+[Unit]
+Description=SyncClient Google Drive Background Sync Engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fayfer/Projectos-Programacion/SyncClient-main
+ExecStart=/usr/bin/node /home/fayfer/Projectos-Programacion/SyncClient-main/dist/server.mjs
+Restart=on-failure
+RestartSec=5s
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,172 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { DriveCursor } from '../shared/schema';
+import { DriveChangesIngestor, DriveCursorRescanRequiredError } from './driveChanges';
+
+function response(body: unknown, status = 200, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+function storage(initial?: DriveCursor) {
+  let cursor = initial ?? null;
+  return {
+    getDriveCursor: vi.fn(() => cursor),
+    setDriveCursor: vi.fn((next: DriveCursor) => { cursor = next; }),
+  };
+}
+
+describe('DriveChangesIngestor', () => {
+  it('paginates and commits only the final token after all changes', async () => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ changes: [{ fileId: 'a' }], nextPageToken: 'next' }))
+      .mockResolvedValueOnce(response({ changes: [{ fileId: 'b' }], newStartPageToken: 'final' }));
+    const applied: string[] = [];
+    const result = await new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' },
+      change => { applied.push(change.fileId); },
+    );
+    expect(applied).toEqual(['a', 'b']);
+    expect(result.pageCount).toBe(2);
+    expect(db.setDriveCursor).toHaveBeenCalledWith(expect.objectContaining({ page_token: 'final' }));
+  });
+
+  it('does not advance the cursor when applying a change fails', async () => {
+    const db = storage({ pair_id: 'p', account_id: 'a', corpus_id: 'user', drive_id: 'my-drive', page_token: 'old', last_success_at: null, status: 'active' });
+    const fetcher = vi.fn().mockResolvedValue(response({ changes: [{ fileId: 'a' }], newStartPageToken: 'new' }));
+    await expect(new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, () => { throw new Error('apply failed'); },
+    )).rejects.toThrow('apply failed');
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+
+  it('signals a controlled rescan for invalid or expired cursors', async () => {
+    const db = storage({ pair_id: 'p', account_id: 'a', corpus_id: 'user', drive_id: 'my-drive', page_token: 'expired', last_success_at: null, status: 'active' });
+    const fetcher = vi.fn().mockResolvedValue(response({ error: { reason: 'invalidPageToken' } }, 400));
+    await expect(new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    )).rejects.toBeInstanceOf(DriveCursorRescanRequiredError);
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+
+  it('can restart from a fresh start token without deleting the previous cursor', async () => {
+    const previous: DriveCursor = {
+      pair_id: 'p',
+      account_id: 'a',
+      corpus_id: 'user',
+      drive_id: 'my-drive',
+      page_token: 'expired',
+      last_success_at: null,
+      status: 'rescan_required',
+    };
+    const db = storage(previous);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'fresh-start' }))
+      .mockResolvedValueOnce(response({ changes: [], newStartPageToken: 'fresh-final' }));
+
+    await new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user', forceRescan: true },
+      vi.fn(),
+    );
+
+    expect(new URL(fetcher.mock.calls[0][0]).pathname).toContain('/changes/startPageToken');
+    expect(db.setDriveCursor).toHaveBeenCalledWith(expect.objectContaining({ page_token: 'fresh-final' }));
+    expect(previous.page_token).toBe('expired');
+  });
+
+  it('can defer cursor persistence until the caller commits applied work', async () => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ changes: [{ fileId: 'a' }], newStartPageToken: 'final' }));
+
+    const result = await new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user', persistCursor: false },
+      vi.fn(),
+    );
+
+    expect(result.pageToken).toBe('final');
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+
+  it('retries transient errors and honors Retry-After', async () => {
+    const db = storage();
+    const delays: number[] = [];
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({}, 429, { 'Retry-After': '2' }))
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ newStartPageToken: 'final', changes: [] }));
+    await new DriveChangesIngestor(db as never, fetcher, 'secret', async ms => { delays.push(ms); }).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(delays).toContain(2000);
+  });
+
+  it.each([500, 502, 503])('retries Drive server failure %s', async status => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({}, status))
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ newStartPageToken: 'final', changes: [] }));
+    await new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('surfaces quota denial without retrying or advancing the cursor', async () => {
+    const db = storage();
+    const fetcher = vi.fn().mockResolvedValue(response({ error: { reason: 'storageQuotaExceeded' } }, 403));
+    await expect(new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    )).rejects.toThrow('403');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+
+  it.each(['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND'])(
+    'retries network error %s before committing the cursor',
+    async code => {
+      const db = storage();
+      const fetcher = vi.fn()
+        .mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+        .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+        .mockResolvedValueOnce(response({ newStartPageToken: 'final', changes: [] }));
+      await new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+        { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+      );
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(db.setDriveCursor).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('adds shared-drive query parameters', async () => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockResolvedValueOnce(response({ newStartPageToken: 'final', changes: [] }));
+    await new DriveChangesIngestor(db as never, fetcher, 'secret').ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'drive', driveId: 'drive-1', corpus: 'drive', includeItemsFromAllDrives: true, supportsAllDrives: true },
+      vi.fn(),
+    );
+    const url = new URL(fetcher.mock.calls[0][0]);
+    expect(url.searchParams.get('driveId')).toBe('drive-1');
+    expect(url.searchParams.get('corpora')).toBe('drive');
+    expect(url.searchParams.get('includeItemsFromAllDrives')).toBe('true');
+    expect(url.searchParams.get('supportsAllDrives')).toBe('true');
+  });
+
+  it('bounds pagination to avoid unbounded nextPageToken loops', async () => {
+    const db = storage();
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response({ startPageToken: 'start' }))
+      .mockImplementation(() => response({ changes: [], nextPageToken: 'loop' }));
+
+    await expect(new DriveChangesIngestor(db as never, fetcher, 'secret', async () => undefined).ingest(
+      { pairId: 'p', accountId: 'a', corpusId: 'user' }, vi.fn(),
+    )).rejects.toThrow('pagination exceeded');
+
+    expect(db.setDriveCursor).not.toHaveBeenCalled();
+  });
+});

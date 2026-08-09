@@ -1,0 +1,828 @@
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:35.759Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1MI1P89GrvtlxickuW9gCJP0JXitnMyat en: /home/fayfer/Documentos/07-maraton.pdf
+[0] [2026-08-02T23:26:35.759Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/07-maraton.pdf
+[0] [2026-08-02T23:26:36.065Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/07-maraton.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:37.592Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/07-maraton.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:40.263Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/07-maraton.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:40.267Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1shFea6IooKm6_ilT_o6ckQN6hVjT1G4o en: /home/fayfer/Documentos/09-maraton.pdf
+[0] [2026-08-02T23:26:40.267Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/09-maraton.pdf
+[0] [2026-08-02T23:26:40.569Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/09-maraton.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:42.311Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/09-maraton.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:45.090Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/09-maraton.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:45.097Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Ps19UoP82J9J4NpFDf8ELc6VlNYewwmi en: /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-02T23:26:45.098Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-02T23:26:45.383Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:46.714Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:49.235Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:49.237Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1a6eovN1JA9G2B_q6NACEDxVfysICA2o5 en: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-02T23:26:49.237Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-02T23:26:49.478Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:50.809Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:53.778Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:53.780Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1-Bduh0mW6MIiGlp3K-N6tR6J1ff1xpwN en: /home/fayfer/Documentos/ficha_solicitud.pdf
+[0] [2026-08-02T23:26:53.780Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/ficha_solicitud.pdf
+[0] [2026-08-02T23:26:54.029Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/ficha_solicitud.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:55.296Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/ficha_solicitud.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:58.499Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/ficha_solicitud.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:26:58.503Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1TJm4olxo1QRnzlfY8AJgninic4DMFGOZ en: /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-02T23:26:58.503Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-02T23:26:58.736Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/Firma.jpg TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:00.395Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/Firma.jpg TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:03.173Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/Firma.jpg TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:03.181Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1hUePFmMPM0rKDXCM71FhBK18duith3dK en: /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf
+[0] [2026-08-02T23:27:03.181Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf
+[0] [2026-08-02T23:27:03.442Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:05.175Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:08.022Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:08.025Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1HOosbjNNHD9VO72oELY34Huckpdj3jaR en: /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-02T23:27:08.026Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-02T23:27:08.284Z] [ERROR] [Transfer] [Transfer] Error en el intento 1 de descarga para /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:09.846Z] [ERROR] [Transfer] [Transfer] Error en el intento 2 de descarga para /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:12.723Z] [ERROR] [Transfer] [Transfer] Error en el intento 3 de descarga para /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf TransferHttpError: Transfer request failed (404)
+[0]     at downloadToAtomicFile (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/transfer.ts:410:49)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.downloadDriveBinary (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1625:3)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1335:5)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25) {
+[0]   status: 404
+[0] }
+[0] [2026-08-02T23:27:14.047Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 128 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-02T23:27:23.647Z] [WARN ] [SyncEngine] [SyncEngine] pair=w49cxfp8c retained incomplete transfer state; cursor will not advance
+[0] [2026-08-02T23:27:23.647Z] [ERROR] [SyncEngine] [SyncEngine] pair=w49cxfp8c sync failed; recoverable state was retained: Native sync did not complete; pending work was retained
+[0] Error: Native sync did not complete; pending work was retained
+[0]     at SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1027:11)
+[1] [556102:0802/182726.663431:ERROR:network_service_instance_impl.cc(499)] Network service crashed, restarting service.
+[0] npm run dev exited with code 137
+[1] [Electron] Frontend cargado correctamente.
+^[[A^[[A^[^[^C[1] /home/fayfer/Projectos-Programacion/SyncClient-V1/node_modules/electron/dist/electron exited with signal SIGINT
+[1] wait-on tcp:3000 && electron . --no-sandbox exited with code SIGINT
+
+
+…/SyncClient-V1 on  main [✘!?] via  v22.22.1 took 13m19s ✗ npm run electron:dev
+
+> syncclient@0.0.0 electron:dev
+> kill-port 3000 && npm run build && concurrently "npm run dev" "wait-on tcp:3000 && electron . --no-sandbox"
+
+Could not kill process on port 3000. No process running on port.
+
+> syncclient@0.0.0 build
+> vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs
+
+vite v6.4.3 building for production...
+[plugin vite:resolve] Module "fs" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "crypto" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "node:module" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "fs/promises" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "fs/promises" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. (x2)
+[plugin vite:resolve] Module "fs" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "path" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+✓ 2124 modules transformed.
+[plugin vite:reporter] 
+(!) __vite-browser-external is dynamically imported by /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts but also statically imported by /home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts, dynamic import will not move module into another chunk.
+
+dist/assets/syncclient-CkNHLgRZ.ico           0.03 kB
+dist/index.html                               0.64 kB │ gzip:   0.40 kB
+dist/assets/index-wVtdeoGN.css               70.12 kB │ gzip:  10.31 kB
+dist/assets/streamedFilesystem-CtEajSVU.js    0.11 kB │ gzip:   0.10 kB
+dist/assets/web-BZk-52kD.js                   0.38 kB │ gzip:   0.25 kB
+dist/assets/web-DWko6E0m.js                   0.84 kB │ gzip:   0.40 kB
+dist/assets/web-CAqGjI_d.js                   1.00 kB │ gzip:   0.43 kB
+dist/assets/fileSystem-CSivv2UL.js            3.95 kB │ gzip:   1.18 kB
+dist/assets/web-BYwxa9RS.js                   8.73 kB │ gzip:   2.98 kB
+dist/assets/sql-wasm-browser-CEJYdpDO.js     41.09 kB │ gzip:  14.76 kB
+dist/assets/SyncEngine-CPXsZEpT.js           55.95 kB │ gzip:  15.54 kB
+dist/assets/index-DbSWIFoi.js               627.85 kB │ gzip: 171.30 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 3.83s
+
+  dist/server.cjs      185.5kb
+  dist/server.cjs.map  349.4kb
+
+⚡ Done in 16ms
+[0] 
+[0] > syncclient@0.0.0 dev
+[0] > tsx server.ts
+[0] 
+[0] [Logger] Logging to file: /home/fayfer/.config/syncclient/logs/sync-client.log
+[0] [SQLiteBackend] Native (better-sqlite3) initialized at /home/fayfer/.config/syncclient/sync_state_v2.db
+[0] [StorageBackend] Using SQLite
+[0] [2026-08-02T23:33:12.958Z] [INFO ] [SyncEngine] v2 DB initialized, device: 67f55652-9001-4210-950a-61da7b302f86
+[0] [2026-08-02T23:33:12.963Z] [WARN ] [SyncEngine] [Recovery] pair=w49cxfp8c Recovery queued: 38 operation(s), 38 pending journal entries
+[0] [Info] Servidor backend activo en http://127.0.0.1:3000
+[1] [Electron] Conexión establecida con el servidor backend.
+[1] [571279:0802/183316.747740:ERROR:CONSOLE(1)] "TypeError: Failed to fetch", source: devtools://devtools/bundled/entrypoints/main/main.js (1)
+[0] [2026-08-02T23:33:18.044Z] [INFO ] [SyncEngine] [SyncEngine/Auth] Token recibido: OAuth2 Access Token
+[0] [2026-08-02T23:33:18.048Z] [INFO ] [SyncEngine] [SyncEngine/Auth] Token recibido: OAuth2 Access Token
+[0] [2026-08-02T23:33:18.722Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 38 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[1] [571308:0802/183322.410423:ERROR:gl_surface_presentation_helper.cc(260)] GetVSyncParametersIfAvailable() failed for 1 times!
+[1] [571308:0802/183322.411318:ERROR:gl_surface_presentation_helper.cc(260)] GetVSyncParametersIfAvailable() failed for 2 times!
+[1] [571308:0802/183322.419036:ERROR:gl_surface_presentation_helper.cc(260)] GetVSyncParametersIfAvailable() failed for 3 times!
+[0] [2026-08-02T23:38:51.895Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1JW5FUYcrNuMkERqBoUmsocBQFH2jQqqN en: /home/fayfer/Documentos/01-maraton.pdf
+[0] [2026-08-02T23:38:51.896Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/01-maraton.pdf
+[0] [2026-08-02T23:38:52.874Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/01-maraton.pdf.syncclient-download-1785713931896-734e91e2-7b9d-4e5a-82a5-10c407be48c9 a /home/fayfer/Documentos/01-maraton.pdf
+[0] [2026-08-02T23:38:52.883Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1dnHmzCrUeCe3ARxvHwUllTStxuLpbJFh en: /home/fayfer/Documentos/01-maraton.remote.pdf
+[0] [2026-08-02T23:38:52.883Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/01-maraton.remote.pdf
+[0] [2026-08-02T23:38:53.663Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/01-maraton.remote.pdf.syncclient-download-1785713932884-8cf3efee-c8b7-41ec-a2d0-f229530d998d a /home/fayfer/Documentos/01-maraton.remote.pdf
+[0] [2026-08-02T23:38:53.671Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 10yvRWFsM5ga03RSXX5CQhIrpY_6KwrjD en: /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-02T23:38:53.671Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-02T23:38:56.289Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/02-maraton.pdf.syncclient-download-1785713933672-860c1cad-fd60-4620-b75b-40eceb5fc9df a /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-02T23:38:56.292Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1kJmf_4RHteYT_NN9j97_VmWST70pEHg4 en: /home/fayfer/Documentos/03-maraton.pdf
+[0] [2026-08-02T23:38:56.293Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/03-maraton.pdf
+[0] [2026-08-02T23:38:57.304Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/03-maraton.pdf.syncclient-download-1785713936294-79d72a72-b592-409c-928a-6f2a8f116721 a /home/fayfer/Documentos/03-maraton.pdf
+[0] [2026-08-02T23:38:57.314Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1EgaN2qMRV_0906nF4wn7r74XrQYjQKta en: /home/fayfer/Documentos/03-maraton.remote.pdf
+[0] [2026-08-02T23:38:57.314Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/03-maraton.remote.pdf
+[0] [2026-08-02T23:38:58.252Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/03-maraton.remote.pdf.syncclient-download-1785713937315-2cd2dcd7-10c0-4c07-9014-d53cee6355b4 a /home/fayfer/Documentos/03-maraton.remote.pdf
+[0] [2026-08-02T23:38:58.268Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1mqr8NHt1KCVz2OjPVpl0Le0QAMssrXTo en: /home/fayfer/Documentos/04-maraton.pdf
+[0] [2026-08-02T23:38:58.268Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/04-maraton.pdf
+[0] [2026-08-02T23:39:01.198Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/04-maraton.pdf.syncclient-download-1785713938271-bc4257df-834f-4f99-8928-c24f587e0e34 a /home/fayfer/Documentos/04-maraton.pdf
+[0] [2026-08-02T23:39:01.201Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1TlG3hwmTOwUOV49PsOrl7l1pVl_PDJkt en: /home/fayfer/Documentos/06-maraton.pdf
+[0] [2026-08-02T23:39:01.201Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/06-maraton.pdf
+[0] [2026-08-02T23:39:04.230Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/06-maraton.pdf.syncclient-download-1785713941202-a79221a1-5a57-41a9-a381-3ce905388356 a /home/fayfer/Documentos/06-maraton.pdf
+[0] [2026-08-02T23:39:04.239Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1MI1P89GrvtlxickuW9gCJP0JXitnMyat en: /home/fayfer/Documentos/07-maraton.pdf
+[0] [2026-08-02T23:39:04.239Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/07-maraton.pdf
+[0] [2026-08-02T23:39:07.933Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/07-maraton.pdf.syncclient-download-1785713944240-e330de5a-a848-42cd-a4da-933851e47aa9 a /home/fayfer/Documentos/07-maraton.pdf
+[0] [2026-08-02T23:39:07.944Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1shFea6IooKm6_ilT_o6ckQN6hVjT1G4o en: /home/fayfer/Documentos/09-maraton.pdf
+[0] [2026-08-02T23:39:07.944Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/09-maraton.pdf
+[0] [2026-08-02T23:39:12.258Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/09-maraton.pdf.syncclient-download-1785713947947-33625b34-abf3-45ca-ada4-49f3445350b3 a /home/fayfer/Documentos/09-maraton.pdf
+[0] [2026-08-02T23:39:12.273Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Ps19UoP82J9J4NpFDf8ELc6VlNYewwmi en: /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-02T23:39:12.273Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-02T23:39:12.951Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg.syncclient-download-1785713952276-669d6411-baff-4ead-91a4-1239c56e307d a /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-02T23:39:12.956Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1a6eovN1JA9G2B_q6NACEDxVfysICA2o5 en: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-02T23:39:12.957Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-02T23:39:15.206Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf.syncclient-download-1785713952958-7117a80b-868f-46a5-96cd-2eb8410ceada a /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-02T23:39:15.215Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1-Bduh0mW6MIiGlp3K-N6tR6J1ff1xpwN en: /home/fayfer/Documentos/ficha_solicitud.pdf
+[0] [2026-08-02T23:39:15.216Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/ficha_solicitud.pdf
+[0] [2026-08-02T23:39:16.264Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/ficha_solicitud.pdf.syncclient-download-1785713955218-0fb7e516-6452-4e4d-beb9-b5689dac0704 a /home/fayfer/Documentos/ficha_solicitud.pdf
+[0] [2026-08-02T23:39:16.268Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1TJm4olxo1QRnzlfY8AJgninic4DMFGOZ en: /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-02T23:39:16.269Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-02T23:39:17.062Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Firma.jpg.syncclient-download-1785713956270-1e64d053-4f78-45dd-900a-5a7888885d4a a /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-02T23:39:17.066Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1hUePFmMPM0rKDXCM71FhBK18duith3dK en: /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf
+[0] [2026-08-02T23:39:17.066Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf
+[0] [2026-08-02T23:39:23.972Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf.syncclient-download-1785713957067-cbd19567-b70e-4336-ac2f-8c7a175e5806 a /home/fayfer/Documentos/Roman - 2008 - Advanced Linear Algebra.pdf
+[0] [2026-08-02T23:39:23.984Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1HOosbjNNHD9VO72oELY34Huckpdj3jaR en: /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-02T23:39:23.984Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-02T23:39:46.082Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf.syncclient-download-1785713963990-d2b75cbf-7722-4e03-9539-5d028066e042 a /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-02T23:39:46.090Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 128 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-02T23:45:19.494Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1yu2biBbBvwQsg2aTov6UuySX-Smna6zk en: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(1).pdf
+[0] [2026-08-02T23:45:19.494Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(1).pdf
+[0] [2026-08-02T23:45:22.625Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(1).pdf.syncclient-download-1785714319494-3700cc54-182b-4b53-92b6-f909ba1daf8b a /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(1).pdf
+[0] [2026-08-02T23:45:22.627Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 16u9CYSoQWKwUcWEjuC-mPaaaV6XHqlIf en: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(3).pdf
+[0] [2026-08-02T23:45:22.627Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(3).pdf
+[0] [2026-08-02T23:45:25.699Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(3).pdf.syncclient-download-1785714322628-7bb39327-4c62-4aaf-a955-6a20675c7984 a /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026(3).pdf
+[0] [2026-08-02T23:45:25.701Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1bMJ9qR-XnY5OJ_y_jiPHyuAgI3CMqo_X en: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026.pdf
+[0] [2026-08-02T23:45:25.701Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026.pdf
+[0] [2026-08-02T23:45:27.929Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026.pdf.syncclient-download-1785714325703-10db7bbe-bfbf-40c6-b442-63c248c18c03 a /home/fayfer/Documentos/Apuntes_Tablet_StarNote/1-agosto-2026.pdf
+[0] [2026-08-02T23:45:27.931Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1XGFIDiHe9K1ec7Zz0ryd-E_yH0YTpngT en: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/trabajo-1-agosto-2026.pdf
+[0] [2026-08-02T23:45:27.931Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Apuntes_Tablet_StarNote/trabajo-1-agosto-2026.pdf
+[0] [2026-08-02T23:45:29.110Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Apuntes_Tablet_StarNote/trabajo-1-agosto-2026.pdf.syncclient-download-1785714327932-a1ff2c1f-88e3-43de-95e8-306bd2a2265a a /home/fayfer/Documentos/Apuntes_Tablet_StarNote/trabajo-1-agosto-2026.pdf
+[0] [2026-08-02T23:47:51.676Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 7 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-02T23:49:34.777Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 14 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-02T23:53:16.235Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 5 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:00:07.609Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 14A-SE8PnHlET_jQ5BmiJBvxLRXWqbcRh en: /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_p.pdf
+[0] [2026-08-03T00:00:07.609Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_p.pdf
+[0] [2026-08-03T00:00:09.636Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_p.pdf.syncclient-download-1785715207610-f19a979a-d288-429b-ac0b-413f1af0c843 a /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_p.pdf
+[0] [2026-08-03T00:00:09.640Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1yYbYUzpPUEKLf0SnFArnkhZu6fcVZ7RS en: /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_s.pdf
+[0] [2026-08-03T00:00:09.640Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_s.pdf
+[0] [2026-08-03T00:00:11.874Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_s.pdf.syncclient-download-1785715209642-c867870a-c3a9-4523-aa14-8d722581d3ea a /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/emacs/introCTX_esp_s.pdf
+[0] 7:01:53 p.m. [vite] (client) page reload src/shared/Scanner.ts
+[1] [Electron] Frontend cargado correctamente.
+[1] Abriendo en una sesión existente del navegador
+[0] 7:02:00 p.m. [vite] (client) page reload src/shared/Scanner.ts
+[1] [Electron] Frontend cargado correctamente.
+[1] Abriendo en una sesión existente del navegador
+[0] 7:02:07 p.m. [vite] (client) page reload src/backend/syncEngine.ts
+[1] [Electron] Frontend cargado correctamente.
+[1] Abriendo en una sesión existente del navegador
+[0] [2026-08-03T00:02:19.284Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1ifGxyMjlge-hg4j1UZ50Yr_5bYGBY9NN en: /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/latex/auctex.pdf
+[0] [2026-08-03T00:02:19.284Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/latex/auctex.pdf
+[0] [2026-08-03T00:02:20.755Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/latex/auctex.pdf.syncclient-download-1785715339284-b9d8cd2d-9171-475f-b8c0-05f3349f6884 a /home/fayfer/Documentos/Books/Computer_Science_Theory-Programming/latex/auctex.pdf
+[0] [2026-08-03T00:02:24.696Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 15 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] 7:02:26 p.m. [vite] (client) hmr update /src/index.css, /src/components/SyncApp.tsx
+[0] [2026-08-03T00:02:30.299Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for (Tools and Techniques for Computer Typesetting) Frank Mittelbach, Ulrike Fischer - The LaTeX Companion_ Parts I & II-Addison-Wesley Professional.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:30.621Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for Herbert Voss - Typesetting Tables with LaTeX (2010, UIT Cambridge) - libgen.li.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:30.867Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for Knuth y Knuth - 2011 - The Metafontbook.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:31.096Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for Knuth y Knuth - 2011 - The Texbook.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:31.378Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for Lehman y Wright - The etoolbox Package.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:31.567Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for The Grammar Book_ An ESL_EFL Teacher's Course, Second -- Marianne Celce-Murcia, Diane Larsen-Freeman with Howard -- 2nd ed_, Boston, Massachusetts, -- isbn13 9780838447253 -- 368f4442b5ccb93e62658133c2ee2e02 -- Anna’s Archive.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:31.752Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for beameruserguide.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:31.968Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for latexindent.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:32.195Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for pgfmanual.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:32.382Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for pgfplots.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:32.567Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for scrguide-en.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:32.774Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for tcolorbox.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:33.003Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for tikz-cd-doc.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:33.211Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for tkz-euclide.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:33.443Z] [WARN ] [SyncEngine] [SyncEngine/Reconcile] Could not refresh remote metadata for auctex.pdf; preserving existing state: Drive API error (401)
+[0] [2026-08-03T00:02:33.445Z] [ERROR] [SyncEngine] [SyncEngine] pair=w49cxfp8c sync failed; recoverable state was retained: No OAuth access token set
+[0] Error: No OAuth access token set
+[0]     at SyncEngine.listDriveFiles (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1570:31)
+[0]     at SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1180:32)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1472:28)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1472:28)
+[0]     at async SyncEngine.v2SyncDirectoryTree (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1472:28)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1024:25)
+[1] [Electron] Abriendo ventana emergente: https://gen-lang-client-0459053075.firebaseapp.com/__/auth/handler?apiKey=AIzaSyAobuWG8WiWU4kFHwDCmwoyHb9Hx9NGvPQ&appName=%5BDEFAULT%5D&authType=signInViaPopup&redirectUrl=http%3A%2F%2Flocalhost%3A3000%2F&v=12.17.0&eventId=2585223157&providerId=google.com&customParameters=%7B%22access_type%22%3A%22offline%22%2C%22prompt%22%3A%22consent%20select_account%22%7D&scopes=profile%2Chttps%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive
+[0] [2026-08-03T00:04:58.065Z] [INFO ] [SyncEngine] [SyncEngine/Auth] Token recibido: OAuth2 Access Token
+^C[0] [Info] Recibida señal SIGINT. Cerrando el servidor de forma controlada...
+[0] [Info] Servidor HTTP cerrado.
+[0] [2026-08-03T00:05:04.272Z] [INFO ] [SyncEngine] [SyncEngine] Iniciando cierre controlado...
+[0] [2026-08-03T00:05:04.273Z] [INFO ] [SyncEngine] [SyncEngine] Intervalos de sondeo detenidos.
+[0] [2026-08-03T00:05:04.274Z] [INFO ] [SyncEngine] [SyncEngine] Monitor de unidades externas detenido.
+[1] /home/fayfer/Projectos-Programacion/SyncClient-V1/node_modules/electron/dist/electron exited with signal SIGINT
+[1] wait-on tcp:3000 && electron . --no-sandbox exited with code SIGINT
+[0] [2026-08-03T00:05:04.595Z] [INFO ] [SyncEngine] [SyncEngine] Observadores de archivos cerrados.
+[0] [SQLiteBackend/Native] Database closed.
+[0] [2026-08-03T00:05:04.596Z] [INFO ] [SyncEngine] [SyncEngine] Conexión a la base de datos cerrada.
+[0] [2026-08-03T00:05:04.596Z] [INFO ] [SyncEngine] [SyncEngine] Cierre controlado completado.
+[0] [Info] Motor de sincronización detenido.
+[0] npm run dev exited with code SIGINT
+
+
+…/SyncClient-V1 on  main [✘!?] via  v22.22.1 took 31m59s ✗ npm run electron:dev
+
+> syncclient@0.0.0 electron:dev
+> kill-port 3000 && npm run build && concurrently "npm run dev" "wait-on tcp:3000 && electron . --no-sandbox"
+
+Could not kill process on port 3000. No process running on port.
+
+> syncclient@0.0.0 build
+> vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs
+
+vite v6.4.3 building for production...
+[plugin vite:resolve] Module "fs" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "crypto" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "node:module" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "fs/promises" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "fs/promises" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details. (x2)
+[plugin vite:resolve] Module "fs" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+[plugin vite:resolve] Module "path" has been externalized for browser compatibility, imported by "/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.
+✓ 2124 modules transformed.
+[plugin vite:reporter] 
+(!) __vite-browser-external is dynamically imported by /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/Scanner.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/shared/StorageBackend.ts but also statically imported by /home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts, /home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/logger.ts, dynamic import will not move module into another chunk.
+
+dist/assets/syncclient-CkNHLgRZ.ico           0.03 kB
+dist/index.html                               0.64 kB │ gzip:   0.40 kB
+dist/assets/index-wVtdeoGN.css               70.12 kB │ gzip:  10.31 kB
+dist/assets/streamedFilesystem-CQkJai5b.js    0.11 kB │ gzip:   0.10 kB
+dist/assets/web-DBdyOFEY.js                   0.38 kB │ gzip:   0.25 kB
+dist/assets/web-nLchDNOx.js                   0.84 kB │ gzip:   0.40 kB
+dist/assets/web-Bz3Tgt_5.js                   1.00 kB │ gzip:   0.43 kB
+dist/assets/fileSystem-BXZAT1kn.js            3.95 kB │ gzip:   1.18 kB
+dist/assets/web-_gjkVqTw.js                   8.73 kB │ gzip:   2.98 kB
+dist/assets/sql-wasm-browser-D4SkM5St.js     41.09 kB │ gzip:  14.76 kB
+dist/assets/SyncEngine-8KvDKH6U.js           57.22 kB │ gzip:  16.00 kB
+dist/assets/index-C0slwYum.js               627.85 kB │ gzip: 171.30 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 8.17s
+
+  dist/server.cjs      188.2kb
+  dist/server.cjs.map  351.8kb
+
+⚡ Done in 28ms
+[0] 
+[0] > syncclient@0.0.0 dev
+[0] > tsx server.ts
+[0] 
+[0] [Logger] Logging to file: /home/fayfer/.config/syncclient/logs/sync-client.log
+[0] [SQLiteBackend] Native (better-sqlite3) initialized at /home/fayfer/.config/syncclient/sync_state_v2.db
+[0] [StorageBackend] Using SQLite
+[0] [2026-08-03T00:05:27.440Z] [INFO ] [SyncEngine] v2 DB initialized, device: 67f55652-9001-4210-950a-61da7b302f86
+[0] [2026-08-03T00:05:27.457Z] [WARN ] [SyncEngine] [Recovery] pair=w49cxfp8c Recovery queued: 0 operation(s), 187 pending journal entries
+[0] [Info] Servidor backend activo en http://127.0.0.1:3000
+[1] [Electron] Conexión establecida con el servidor backend.
+[1] [597621:0802/190534.470094:ERROR:gl_surface_presentation_helper.cc(260)] GetVSyncParametersIfAvailable() failed for 1 times!
+[1] [597576:0802/190535.014873:ERROR:CONSOLE(1)] "TypeError: Failed to fetch", source: devtools://devtools/bundled/entrypoints/main/main.js (1)
+[1] Abriendo en una sesión existente del navegador
+[1] [597621:0802/190537.810295:ERROR:gl_surface_presentation_helper.cc(260)] GetVSyncParametersIfAvailable() failed for 2 times!
+[1] Abriendo en una sesión existente del navegador
+[1] [Electron] Abriendo ventana emergente: https://gen-lang-client-0459053075.firebaseapp.com/__/auth/handler?apiKey=AIzaSyAobuWG8WiWU4kFHwDCmwoyHb9Hx9NGvPQ&appName=%5BDEFAULT%5D&authType=signInViaPopup&redirectUrl=http%3A%2F%2Flocalhost%3A3000%2F&v=12.17.0&eventId=7489130684&providerId=google.com&customParameters=%7B%22access_type%22%3A%22offline%22%2C%22prompt%22%3A%22consent%20select_account%22%7D&scopes=profile%2Chttps%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive
+[1] [597621:0802/190554.725399:ERROR:gl_surface_presentation_helper.cc(260)] GetVSyncParametersIfAvailable() failed for 3 times!
+[0] [2026-08-03T00:07:33.450Z] [INFO ] [SyncEngine] [SyncEngine/Auth] Token recibido: OAuth2 Access Token
+[0] [2026-08-03T00:07:33.825Z] [ERROR] [SyncEngine] [SyncEngine] pair=w49cxfp8c sync failed; recoverable state was retained: Drive API error (401)
+[0] Error: Drive API error (401)
+[0]     at SyncEngine.handleDriveResponse (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1564:9)
+[0]     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+[0]     at async SyncEngine.listDriveFiles (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1585:3)
+[0]     at async SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1008:17)
+[0] [2026-08-03T00:07:33.943Z] [INFO ] [SyncEngine] [SyncEngine/Auth] Token recibido: OAuth2 Access Token
+[0] [2026-08-03T00:11:17.386Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 20 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:11:26.337Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1mhVgZo1H0AVvcOskjfKMFnHFe99NkVW0 en: /home/fayfer/Documentos/.sync-exclude.lst
+[0] [2026-08-03T00:11:26.338Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/.sync-exclude.lst
+[0] [2026-08-03T00:11:26.403Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 1 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:11:26.888Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/.sync-exclude.lst.syncclient-download-1785715886338-57b06782-9ec4-4593-90d9-70ad64e6280f a /home/fayfer/Documentos/.sync-exclude.lst
+[0] [2026-08-03T00:11:36.116Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1WNJTDrWCxuVK8B92RIlpu40CXANQJhSU en: /home/fayfer/Documentos/zshrc.txt
+[0] [2026-08-03T00:11:36.117Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/zshrc.txt
+[0] [2026-08-03T00:11:36.939Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/zshrc.txt.syncclient-download-1785715896129-cfcda82a-3102-4133-b4fe-e392d2cbf802 a /home/fayfer/Documentos/zshrc.txt
+[0] [2026-08-03T00:12:34.015Z] [WARN ] [SyncEngine] [SyncEngine] pair=w49cxfp8c retained incomplete transfer state; cursor will not advance
+[0] [2026-08-03T00:12:34.016Z] [ERROR] [SyncEngine] [SyncEngine] pair=w49cxfp8c sync failed; recoverable state was retained: Native sync did not complete; pending work was retained
+[0] Error: Native sync did not complete; pending work was retained
+[0]     at SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1027:11)
+[0] [2026-08-03T00:12:39.595Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 112 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:13:33.333Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1rP0zvro-Roo3UNE4JCnfHctO50UL2NL- en: /home/fayfer/Documentos/.ttxfolder
+[0] [2026-08-03T00:13:33.333Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/.ttxfolder
+[0] [2026-08-03T00:13:34.322Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/.ttxfolder.syncclient-download-1785716013333-a2cb8e27-96b9-4ede-86ad-12a7ff89bead a /home/fayfer/Documentos/.ttxfolder
+[0] [2026-08-03T00:13:34.327Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 10yvRWFsM5ga03RSXX5CQhIrpY_6KwrjD en: /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-03T00:13:34.327Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-03T00:13:36.799Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/02-maraton.pdf.syncclient-download-1785716014331-deb0979d-94fe-4f7d-b4be-28b689d531fc a /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-03T00:13:36.801Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1mqr8NHt1KCVz2OjPVpl0Le0QAMssrXTo en: /home/fayfer/Documentos/04-maraton.pdf
+[0] [2026-08-03T00:13:36.801Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/04-maraton.pdf
+[0] [2026-08-03T00:13:39.622Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/04-maraton.pdf.syncclient-download-1785716016802-d8773146-807b-4935-b88b-e1b252674239 a /home/fayfer/Documentos/04-maraton.pdf
+[0] [2026-08-03T00:13:39.623Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1TlG3hwmTOwUOV49PsOrl7l1pVl_PDJkt en: /home/fayfer/Documentos/06-maraton.pdf
+[0] [2026-08-03T00:13:39.623Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/06-maraton.pdf
+[0] [2026-08-03T00:13:41.015Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/06-maraton.pdf.syncclient-download-1785716019624-8109d508-8536-40cd-819c-2b80d4f0b76d a /home/fayfer/Documentos/06-maraton.pdf
+[0] [2026-08-03T00:13:41.017Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1b76CvYuD5INCRIjmILYeqgTQm5CALfGp en: /home/fayfer/Documentos/12-diciembre-2025.pdf
+[0] [2026-08-03T00:13:41.017Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/12-diciembre-2025.pdf
+[0] [2026-08-03T00:13:42.795Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/12-diciembre-2025.pdf.syncclient-download-1785716021017-0c8d6604-2a2c-41b0-be3b-7721fff929a4 a /home/fayfer/Documentos/12-diciembre-2025.pdf
+[0] [2026-08-03T00:13:42.796Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1gFlq_APMwkvc_wvx-j2vurEE_6Ng1_s6 en: /home/fayfer/Documentos/14-enero-2026.pdf
+[0] [2026-08-03T00:13:42.796Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/14-enero-2026.pdf
+[0] [2026-08-03T00:13:44.727Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/14-enero-2026.pdf.syncclient-download-1785716022797-0bc15977-80fe-45f9-bbc4-77d9adc2c83f a /home/fayfer/Documentos/14-enero-2026.pdf
+[0] [2026-08-03T00:13:44.728Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1MNM_b8ut7a5rUTnnoZN_oy_NpIoVXAvo en: /home/fayfer/Documentos/16-enero-2025.pdf
+[0] [2026-08-03T00:13:44.728Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/16-enero-2025.pdf
+[0] [2026-08-03T00:13:46.889Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/16-enero-2025.pdf.syncclient-download-1785716024729-feda9bff-881d-4be5-b1c6-940865e13eaa a /home/fayfer/Documentos/16-enero-2025.pdf
+[0] [2026-08-03T00:13:46.891Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1xnizBZ_mIAejtVP4R7gttO4QUhAQec8j en: /home/fayfer/Documentos/19 de mayo de 2026 - 11pm.pdf
+[0] [2026-08-03T00:13:46.891Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/19 de mayo de 2026 - 11pm.pdf
+[0] [2026-08-03T00:13:47.630Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/19 de mayo de 2026 - 11pm.pdf.syncclient-download-1785716026892-a038688c-1f31-40e3-9943-abf28105662a a /home/fayfer/Documentos/19 de mayo de 2026 - 11pm.pdf
+[0] [2026-08-03T00:13:47.632Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 12NO31sA45ezSM87XW0NYukYCwjxVYFJm en: /home/fayfer/Documentos/2-enero-2026.pdf
+[0] [2026-08-03T00:13:47.632Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/2-enero-2026.pdf
+[0] [2026-08-03T00:13:49.679Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/2-enero-2026.pdf.syncclient-download-1785716027632-9bd55572-e56d-4950-9984-f94cdbf56d25 a /home/fayfer/Documentos/2-enero-2026.pdf
+[0] [2026-08-03T00:13:49.682Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1o9l-ahSHuWVr487CLgxuDVCws4ShtBSI en: /home/fayfer/Documentos/2.3.pdf
+[0] [2026-08-03T00:13:49.682Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/2.3.pdf
+[0] [2026-08-03T00:13:51.820Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/2.3.pdf.syncclient-download-1785716029683-3fb4f599-daef-42c7-ab96-0e525e1497a1 a /home/fayfer/Documentos/2.3.pdf
+[0] [2026-08-03T00:13:51.821Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1WZBW4i6r5ULmTblmcXeCJo1-1cQ4kcH8 en: /home/fayfer/Documentos/2.5.pdf
+[0] [2026-08-03T00:13:51.821Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/2.5.pdf
+[0] [2026-08-03T00:13:54.752Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/2.5.pdf.syncclient-download-1785716031821-39293149-749d-43e5-9c8e-cf9704174560 a /home/fayfer/Documentos/2.5.pdf
+[0] [2026-08-03T00:13:54.753Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1XKgFrY1kT8T-HXj3fL1wusdvmxp1GdhD en: /home/fayfer/Documentos/2.8.pdf
+[0] [2026-08-03T00:13:54.753Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/2.8.pdf
+[0] [2026-08-03T00:13:55.310Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/2.8.pdf.syncclient-download-1785716034754-cfcad4b0-c3a3-48e1-adc6-a074951f69f1 a /home/fayfer/Documentos/2.8.pdf
+[0] [2026-08-03T00:13:55.313Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 17isn0hmPAZCss-0XBtA3oD22EvKjqcf4 en: /home/fayfer/Documentos/20169004359-03-B004-01170451.pdf
+[0] [2026-08-03T00:13:55.313Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/20169004359-03-B004-01170451.pdf
+[0] [2026-08-03T00:13:56.369Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/20169004359-03-B004-01170451.pdf.syncclient-download-1785716035313-ae5cd7e1-1a14-47e5-a55f-6b3cc8dd3f77 a /home/fayfer/Documentos/20169004359-03-B004-01170451.pdf
+[0] [2026-08-03T00:13:56.370Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1-xEqGsY7_7nbAJJMkfsGovcDmDW3wog4 en: /home/fayfer/Documentos/21-noviembre-2025.pdf
+[0] [2026-08-03T00:13:56.370Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/21-noviembre-2025.pdf
+[0] [2026-08-03T00:13:58.412Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/21-noviembre-2025.pdf.syncclient-download-1785716036371-6dc38348-c9bc-43d0-b3d9-f31cef7a137d a /home/fayfer/Documentos/21-noviembre-2025.pdf
+[0] [2026-08-03T00:13:58.413Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 12ydH9pb8lvJ3JUron7qN6zcPfPbKF9sk en: /home/fayfer/Documentos/23-julio-2026.pdf
+[0] [2026-08-03T00:13:58.413Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/23-julio-2026.pdf
+[0] [2026-08-03T00:13:59.103Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/23-julio-2026.pdf.syncclient-download-1785716038414-7cb26c0e-8381-480b-accc-732c5cc82763 a /home/fayfer/Documentos/23-julio-2026.pdf
+[0] [2026-08-03T00:13:59.110Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1NWGbF16G8c10p0pahfyedxUg9L_FUnHc en: /home/fayfer/Documentos/25-enero-2026.pdf
+[0] [2026-08-03T00:13:59.111Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/25-enero-2026.pdf
+[0] [2026-08-03T00:14:01.257Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/25-enero-2026.pdf.syncclient-download-1785716039111-89899e0d-356c-486d-a0bc-b301e677c012 a /home/fayfer/Documentos/25-enero-2026.pdf
+[0] [2026-08-03T00:14:01.258Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1ywsbJIpZh4OzY8XPJp7NMStP_0icYc71 en: /home/fayfer/Documentos/26-abril-2026.pdf
+[0] [2026-08-03T00:14:01.258Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/26-abril-2026.pdf
+[0] [2026-08-03T00:14:01.853Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/26-abril-2026.pdf.syncclient-download-1785716041259-ab9ceaeb-80b6-4290-8eff-5e479ed098d3 a /home/fayfer/Documentos/26-abril-2026.pdf
+[0] [2026-08-03T00:14:01.855Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 18r5kdIdvvZ8YjqjdlDsciO5rP_XaJBqZ en: /home/fayfer/Documentos/26-diciembre-2025.pdf
+[0] [2026-08-03T00:14:01.855Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/26-diciembre-2025.pdf
+[0] [2026-08-03T00:14:04.225Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/26-diciembre-2025.pdf.syncclient-download-1785716041856-dbd77e90-a3f0-4350-9df8-2e89f811397e a /home/fayfer/Documentos/26-diciembre-2025.pdf
+[0] [2026-08-03T00:14:04.226Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 17glFA-Ga7Q9n--QJ-mHfGzHz2vrJOCPb en: /home/fayfer/Documentos/28-enero-2026.pdf
+[0] [2026-08-03T00:14:04.226Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/28-enero-2026.pdf
+[0] [2026-08-03T00:14:06.105Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/28-enero-2026.pdf.syncclient-download-1785716044227-033d26a5-f482-466b-8bbe-0b8231695be5 a /home/fayfer/Documentos/28-enero-2026.pdf
+[0] [2026-08-03T00:14:06.107Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Aa07Uf2HiDmtN-vA4h7hjaG4k5_Sn_bD en: /home/fayfer/Documentos/28-noviembre-2025.pdf
+[0] [2026-08-03T00:14:06.107Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/28-noviembre-2025.pdf
+[0] [2026-08-03T00:14:08.999Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/28-noviembre-2025.pdf.syncclient-download-1785716046107-f6270a78-27e5-4553-9adb-33ad568d9030 a /home/fayfer/Documentos/28-noviembre-2025.pdf
+[0] [2026-08-03T00:14:09.003Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1I2C9HK5tGmD3zJmGB9nJxMRbfAK6lbIk en: /home/fayfer/Documentos/29-noviembre-2025.pdf
+[0] [2026-08-03T00:14:09.004Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/29-noviembre-2025.pdf
+[0] [2026-08-03T00:14:13.068Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/29-noviembre-2025.pdf.syncclient-download-1785716049009-89a58c94-2c36-4bb1-bb18-8c977b70f510 a /home/fayfer/Documentos/29-noviembre-2025.pdf
+[0] [2026-08-03T00:14:13.069Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1b3gNSGXlNr2IG2zkiM28WyIc770-67hi en: /home/fayfer/Documentos/5-diciembre-2025.pdf
+[0] [2026-08-03T00:14:13.069Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/5-diciembre-2025.pdf
+[0] [2026-08-03T00:14:15.180Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/5-diciembre-2025.pdf.syncclient-download-1785716053070-3c0396c2-35dc-4f80-983a-46140f21ffb5 a /home/fayfer/Documentos/5-diciembre-2025.pdf
+[0] [2026-08-03T00:14:15.181Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1LHcNfuAuUyUicw1DrGlFwYEyMee2H2wR en: /home/fayfer/Documentos/51081968-7b33-40f1-96cd-55b720757338.jpeg
+[0] [2026-08-03T00:14:15.181Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/51081968-7b33-40f1-96cd-55b720757338.jpeg
+[0] [2026-08-03T00:14:15.900Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/51081968-7b33-40f1-96cd-55b720757338.jpeg.syncclient-download-1785716055182-7e88ea77-5d21-4eb6-898b-19587de06abe a /home/fayfer/Documentos/51081968-7b33-40f1-96cd-55b720757338.jpeg
+[0] [2026-08-03T00:14:15.901Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1_b8Zgl6K4TXgb-45HBfiYmsf6aSGWT2u en: /home/fayfer/Documentos/6-diciembre-2025.pdf
+[0] [2026-08-03T00:14:15.901Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/6-diciembre-2025.pdf
+[0] [2026-08-03T00:14:17.659Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/6-diciembre-2025.pdf.syncclient-download-1785716055902-4ae084f1-4a05-4a08-b860-407a58679deb a /home/fayfer/Documentos/6-diciembre-2025.pdf
+[0] [2026-08-03T00:14:17.661Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1qZ10N1fprHFDbCiZ1yNnsFynQFIE1BYV en: /home/fayfer/Documentos/6-julio-2026.pdf
+[0] [2026-08-03T00:14:17.661Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/6-julio-2026.pdf
+[0] [2026-08-03T00:14:18.350Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/6-julio-2026.pdf.syncclient-download-1785716057661-b13a54c2-75c8-4add-a8b2-3bedacdc3b12 a /home/fayfer/Documentos/6-julio-2026.pdf
+[0] [2026-08-03T00:14:18.352Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1VhvG0E_y8hy6YIvxMRFO2xAoNOWpqv81 en: /home/fayfer/Documentos/7-diciembre-2025.pdf
+[0] [2026-08-03T00:14:18.352Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/7-diciembre-2025.pdf
+[0] [2026-08-03T00:14:22.199Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/7-diciembre-2025.pdf.syncclient-download-1785716058353-21ee2823-70cd-4482-9ab7-ff6c40c15503 a /home/fayfer/Documentos/7-diciembre-2025.pdf
+[0] [2026-08-03T00:14:22.200Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1g6XGGvydf2L8l7F7zufIAgKEmxdBH6LG en: /home/fayfer/Documentos/7-julio-2026-clase-1.pdf
+[0] [2026-08-03T00:14:22.200Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/7-julio-2026-clase-1.pdf
+[0] [2026-08-03T00:14:22.848Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/7-julio-2026-clase-1.pdf.syncclient-download-1785716062201-12968af1-dcad-4032-b023-5c2f76c9c4f0 a /home/fayfer/Documentos/7-julio-2026-clase-1.pdf
+[0] [2026-08-03T00:14:22.850Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 18AQ4Ep7OqBJgsAAE7EpQ8cQ8VIYojH9x en: /home/fayfer/Documentos/9-Diciembre-2025.pdf
+[0] [2026-08-03T00:14:22.850Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/9-Diciembre-2025.pdf
+[0] [2026-08-03T00:14:24.831Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/9-Diciembre-2025.pdf.syncclient-download-1785716062851-b64bf6f6-3655-420b-8200-e2c1abf520c1 a /home/fayfer/Documentos/9-Diciembre-2025.pdf
+[0] [2026-08-03T00:14:24.833Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 19PftlZAqoLRZQiq3cvBVus76wDMX_Rz8 en: /home/fayfer/Documentos/9-enero-2026.pdf
+[0] [2026-08-03T00:14:24.833Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/9-enero-2026.pdf
+[0] [2026-08-03T00:14:28.095Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/9-enero-2026.pdf.syncclient-download-1785716064833-a241e60b-fd1d-43a8-b984-4bb32fe91ea8 a /home/fayfer/Documentos/9-enero-2026.pdf
+[0] [2026-08-03T00:14:28.096Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Ps19UoP82J9J4NpFDf8ELc6VlNYewwmi en: /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-03T00:14:28.096Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-03T00:14:28.817Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg.syncclient-download-1785716068098-c3658cca-bd94-411d-92a9-be43617a0539 a /home/fayfer/Documentos/94ed2116-d055-40b0-bee7-9cf9c7848a09.jpeg
+[0] [2026-08-03T00:14:28.819Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1F_e8Q07ES8qkt-m25ZoYF3OtKs6n_m8a en: /home/fayfer/Documentos/_ Diferencial.pdf
+[0] [2026-08-03T00:14:28.819Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/_ Diferencial.pdf
+[0] [2026-08-03T00:14:31.494Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/_ Diferencial.pdf.syncclient-download-1785716068820-fe0ed4be-e67e-43b2-b771-ded271502042 a /home/fayfer/Documentos/_ Diferencial.pdf
+[0] [2026-08-03T00:14:31.495Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1anTxiVNaDbcSMcsD8fQ4kZZ3CCTk4Q0P en: /home/fayfer/Documentos/_ Topology-Dugundji.pdf
+[0] [2026-08-03T00:14:31.495Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/_ Topology-Dugundji.pdf
+[0] [2026-08-03T00:14:33.984Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/_ Topology-Dugundji.pdf.syncclient-download-1785716071496-059d4702-d0e1-4491-937c-d664803d3b8f a /home/fayfer/Documentos/_ Topology-Dugundji.pdf
+[0] [2026-08-03T00:14:33.986Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1QQv80WXasbLVJZ6vUC4ELdLwTTNNlxch en: /home/fayfer/Documentos/Algebraic-Topology.pdf
+[0] [2026-08-03T00:14:33.986Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Algebraic-Topology.pdf
+[0] [2026-08-03T00:14:37.080Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Algebraic-Topology.pdf.syncclient-download-1785716073986-d74eb535-7c8e-4aa6-a955-ac3a8635fbdd a /home/fayfer/Documentos/Algebraic-Topology.pdf
+[0] [2026-08-03T00:14:37.082Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1pzXs7aLDZOZBcOG_LYk-vdbvWk16WoHz en: /home/fayfer/Documentos/Analisis Real.pdf
+[0] [2026-08-03T00:14:37.082Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Analisis Real.pdf
+[0] [2026-08-03T00:14:40.639Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Analisis Real.pdf.syncclient-download-1785716077082-a3b79708-f90a-49e2-9c3b-0e66149f4366 a /home/fayfer/Documentos/Analisis Real.pdf
+[0] [2026-08-03T00:14:40.641Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1lQLEnVOdSRmJ4QkImYm3Qlb-JNVjxWkI en: /home/fayfer/Documentos/Analisis_Real-clase8.pdf
+[0] [2026-08-03T00:14:40.641Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Analisis_Real-clase8.pdf
+[0] [2026-08-03T00:14:42.575Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Analisis_Real-clase8.pdf.syncclient-download-1785716080642-27555265-18e1-4e22-83c3-df15f2c94f05 a /home/fayfer/Documentos/Analisis_Real-clase8.pdf
+[0] [2026-08-03T00:14:42.577Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1AB38rT6AKmL8QJq49d2XbTgsMY8wbUj8 en: /home/fayfer/Documentos/Analisis_Real_Clase1.pdf
+[0] [2026-08-03T00:14:42.577Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Analisis_Real_Clase1.pdf
+[0] [2026-08-03T00:14:51.606Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Analisis_Real_Clase1.pdf.syncclient-download-1785716082578-b9b88561-940d-4e32-bc76-909cbeb9841b a /home/fayfer/Documentos/Analisis_Real_Clase1.pdf
+[0] [2026-08-03T00:14:51.608Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1r96RuhdMzuYMlArqcEdYyBLe5kUVIa-Y en: /home/fayfer/Documentos/Analisis_Real_Clase2.pdf
+[0] [2026-08-03T00:14:51.608Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Analisis_Real_Clase2.pdf
+[0] [2026-08-03T00:14:55.253Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Analisis_Real_Clase2.pdf.syncclient-download-1785716091608-6833fe0d-bc74-4ecb-b706-412cb021c37d a /home/fayfer/Documentos/Analisis_Real_Clase2.pdf
+[0] [2026-08-03T00:14:55.255Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1MrMnY9rBnrwKevqSrFRq_1u61NTort1P en: /home/fayfer/Documentos/Análisis Complejo - Clase 1.pdf
+[0] [2026-08-03T00:14:55.255Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Análisis Complejo - Clase 1.pdf
+[0] [2026-08-03T00:14:57.303Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Análisis Complejo - Clase 1.pdf.syncclient-download-1785716095256-3657edc6-4835-481d-a5a7-7d2292a804b6 a /home/fayfer/Documentos/Análisis Complejo - Clase 1.pdf
+[0] [2026-08-03T00:14:57.305Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1tZPL70KsUWGMmvyFEq1QyzSdMfg5wOpc en: /home/fayfer/Documentos/Análisis Convexo_Rockafeller.pdf
+[0] [2026-08-03T00:14:57.305Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Análisis Convexo_Rockafeller.pdf
+[0] [2026-08-03T00:15:00.532Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Análisis Convexo_Rockafeller.pdf.syncclient-download-1785716097306-0a278973-0788-4b89-8fd4-9d1448602246 a /home/fayfer/Documentos/Análisis Convexo_Rockafeller.pdf
+[0] [2026-08-03T00:15:00.534Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1_vvhDbZMCMx3WdWkJPJJrCzAC8hGVtI_ en: /home/fayfer/Documentos/Apuntes_1.pdf
+[0] [2026-08-03T00:15:00.534Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Apuntes_1.pdf
+[0] [2026-08-03T00:15:03.670Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Apuntes_1.pdf.syncclient-download-1785716100535-ef4538ec-fbd2-4008-905e-dcf3b3e75058 a /home/fayfer/Documentos/Apuntes_1.pdf
+[0] [2026-08-03T00:15:03.673Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1kZ9QNgZ8GiswpROkzBww7V6YpdUCHYc1 en: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55.pdf
+[0] [2026-08-03T00:15:03.673Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55.pdf
+[0] [2026-08-03T00:15:04.806Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55.pdf.syncclient-download-1785716103674-c6b0da6a-9eed-4186-9f49-709151c13842 a /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55.pdf
+[0] [2026-08-03T00:15:04.808Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1d1hWvDda8YwK6mCiOPbBhFiVmp-EoXfF en: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55_Remastered.pdf
+[0] [2026-08-03T00:15:04.808Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55_Remastered.pdf
+[0] [2026-08-03T00:15:05.875Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55_Remastered.pdf.syncclient-download-1785716104809-3a9101a2-f016-4ee5-be56-14d53e18f09b a /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI-55_Remastered.pdf
+[0] [2026-08-03T00:15:05.878Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1a6eovN1JA9G2B_q6NACEDxVfysICA2o5 en: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-03T00:15:05.878Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-03T00:15:07.181Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf.syncclient-download-1785716105878-b77de927-5274-4e34-9491-a1ea781a0a05 a /home/fayfer/Documentos/BASESCONCURSODEDOCENTES-CEPRE-UNI.pdf
+[0] [2026-08-03T00:15:07.182Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1XEakekcDJo5IWX0Ns3bOTMZpYNtARsXa en: /home/fayfer/Documentos/Berenstein.pdf
+[0] [2026-08-03T00:15:07.182Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Berenstein.pdf
+[0] [2026-08-03T00:15:10.683Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Berenstein.pdf.syncclient-download-1785716107183-eb152b26-f321-4358-92f8-2c323ce7291a a /home/fayfer/Documentos/Berenstein.pdf
+[0] [2026-08-03T00:15:10.686Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1zrBJbAi2e0vvgLRdi7cwiqaqt_jEM5N- en: /home/fayfer/Documentos/Bri-11-julio-2026.pdf
+[0] [2026-08-03T00:15:10.686Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Bri-11-julio-2026.pdf
+[0] [2026-08-03T00:15:13.746Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Bri-11-julio-2026.pdf.syncclient-download-1785716110687-94dc5e19-d2fa-48a6-b984-6fca15fcce59 a /home/fayfer/Documentos/Bri-11-julio-2026.pdf
+[0] [2026-08-03T00:15:13.747Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1j2lETmITuFvrunyHlFwjHID4ctt5tert en: /home/fayfer/Documentos/Cap 1 - Garling.pdf
+[0] [2026-08-03T00:15:13.747Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 1 - Garling.pdf
+[0] [2026-08-03T00:15:16.088Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 1 - Garling.pdf.syncclient-download-1785716113748-3d4c28d0-2a22-44a4-aebb-4a619e524651 a /home/fayfer/Documentos/Cap 1 - Garling.pdf
+[0] [2026-08-03T00:15:16.089Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1XXV0_8KkIfXhyGWsfgqvdglLR4aOGOiy en: /home/fayfer/Documentos/Cap 1 - Lee.pdf
+[0] [2026-08-03T00:15:16.089Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 1 - Lee.pdf
+[0] [2026-08-03T00:15:20.060Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 1 - Lee.pdf.syncclient-download-1785716116090-81e00871-927b-4570-8e8f-09c2b406e811 a /home/fayfer/Documentos/Cap 1 - Lee.pdf
+[0] [2026-08-03T00:15:20.062Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1SWeDlM4CIuXvdRtLt009WFoZMBsogKtd en: /home/fayfer/Documentos/Cap 11 - Cotangent Bundle - Lee.pdf
+[0] [2026-08-03T00:15:20.062Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 11 - Cotangent Bundle - Lee.pdf
+[0] [2026-08-03T00:15:24.036Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 11 - Cotangent Bundle - Lee.pdf.syncclient-download-1785716120063-5ee0ed97-01b1-4486-b425-502a751756c1 a /home/fayfer/Documentos/Cap 11 - Cotangent Bundle - Lee.pdf
+[0] [2026-08-03T00:15:24.038Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1g_sHEN9uhjr-dBtspBonDl5sGQtVgwXo en: /home/fayfer/Documentos/Cap 20_ Holomorphic Functions.pdf
+[0] [2026-08-03T00:15:24.038Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 20_ Holomorphic Functions.pdf
+[0] [2026-08-03T00:15:26.830Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 20_ Holomorphic Functions.pdf.syncclient-download-1785716124038-50a6fd3a-2538-46c5-8e07-d46ce601c93f a /home/fayfer/Documentos/Cap 20_ Holomorphic Functions.pdf
+[0] [2026-08-03T00:15:26.832Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 14pBa180FfY3sCypbFcgv4MMp3RwqVdX2 en: /home/fayfer/Documentos/Cap 3.pdf
+[0] [2026-08-03T00:15:26.832Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 3.pdf
+[0] [2026-08-03T00:15:28.990Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 3.pdf.syncclient-download-1785716126833-c212ab67-8aa2-4d5e-9be6-c1a20aa0b4b8 a /home/fayfer/Documentos/Cap 3.pdf
+[0] [2026-08-03T00:15:28.992Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1jBHOgVQ1x4tIoAvNXcoCNNEAj1F18g0W en: /home/fayfer/Documentos/Cap 5.pdf
+[0] [2026-08-03T00:15:28.992Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 5.pdf
+[0] [2026-08-03T00:15:32.626Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 5.pdf.syncclient-download-1785716128993-cd6f8dc9-7167-4080-be58-5d18737936f1 a /home/fayfer/Documentos/Cap 5.pdf
+[0] [2026-08-03T00:15:32.629Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1e6KJxaMeV1YEgGCYZZEacGZyIHUpzZnm en: /home/fayfer/Documentos/Cap 6_ Módulos sobre DIP.pdf
+[0] [2026-08-03T00:15:32.629Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 6_ Módulos sobre DIP.pdf
+[0] [2026-08-03T00:15:34.706Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 6_ Módulos sobre DIP.pdf.syncclient-download-1785716132629-47593c9c-3ec0-4131-baa7-c306e91b1e64 a /home/fayfer/Documentos/Cap 6_ Módulos sobre DIP.pdf
+[0] [2026-08-03T00:15:34.708Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1q-O7kSkgcvaqhKftSF9Y2Z4X98KQnCIj en: /home/fayfer/Documentos/Cap 7.pdf
+[0] [2026-08-03T00:15:34.708Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 7.pdf
+[0] [2026-08-03T00:15:37.378Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 7.pdf.syncclient-download-1785716134708-35ca6eb9-1cef-46eb-9340-79adf02f7bf8 a /home/fayfer/Documentos/Cap 7.pdf
+[0] [2026-08-03T00:15:37.379Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1VZ2E5ePJLvvT2WvsN-wbLUSB5ckLVL_Y en: /home/fayfer/Documentos/Cap 8_ Eigenvalues and Eigenvectors.pdf
+[0] [2026-08-03T00:15:37.379Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cap 8_ Eigenvalues and Eigenvectors.pdf
+[0] [2026-08-03T00:15:40.148Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cap 8_ Eigenvalues and Eigenvectors.pdf.syncclient-download-1785716137380-b5e8e95e-b2ec-4ff0-a93f-053af3de69fa a /home/fayfer/Documentos/Cap 8_ Eigenvalues and Eigenvectors.pdf
+[0] [2026-08-03T00:15:40.150Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1y19MUhRa7VdZhHmPqQkQMBx_1TDXh-83 en: /home/fayfer/Documentos/CARTA DE COMPROMISO ESTUDIANTES AYUDANTES DE TUTORIA 2025-2.pdf
+[0] [2026-08-03T00:15:40.151Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/CARTA DE COMPROMISO ESTUDIANTES AYUDANTES DE TUTORIA 2025-2.pdf
+[0] [2026-08-03T00:15:41.217Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/CARTA DE COMPROMISO ESTUDIANTES AYUDANTES DE TUTORIA 2025-2.pdf.syncclient-download-1785716140151-d20b44e9-44e9-42ee-bd72-d3ad1f7439c3 a /home/fayfer/Documentos/CARTA DE COMPROMISO ESTUDIANTES AYUDANTES DE TUTORIA 2025-2.pdf
+[0] [2026-08-03T00:15:41.219Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 16cOgRDeHArlQ9eN5zQ7MP8TyHFDJXOBQ en: /home/fayfer/Documentos/Chapter A-3_ Commutative Rings.pdf
+[0] [2026-08-03T00:15:41.219Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Chapter A-3_ Commutative Rings.pdf
+[0] [2026-08-03T00:15:45.392Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Chapter A-3_ Commutative Rings.pdf.syncclient-download-1785716141221-cf16a8ba-e1df-41fb-bf3a-593c0052ddc5 a /home/fayfer/Documentos/Chapter A-3_ Commutative Rings.pdf
+[0] [2026-08-03T00:15:45.394Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Qi8Z4KnFY8u0hJmZXKn12PFWV-zB2SD1 en: /home/fayfer/Documentos/Clase-26-noviembre-2025.pdf
+[0] [2026-08-03T00:15:45.394Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Clase-26-noviembre-2025.pdf
+[0] [2026-08-03T00:15:47.533Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Clase-26-noviembre-2025.pdf.syncclient-download-1785716145394-1d4e0dcd-b68d-45c1-8185-26f72fa2d15c a /home/fayfer/Documentos/Clase-26-noviembre-2025.pdf
+[0] [2026-08-03T00:15:47.535Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1mHEBYVXRDVR8tzW-lvSyDPdk-zcvxTP8 en: /home/fayfer/Documentos/Clase3.pdf
+[0] [2026-08-03T00:15:47.535Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Clase3.pdf
+[0] [2026-08-03T00:15:49.747Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Clase3.pdf.syncclient-download-1785716147535-e41e4b74-28f9-4bee-930a-f1112fbc7ce1 a /home/fayfer/Documentos/Clase3.pdf
+[0] [2026-08-03T00:15:49.749Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Y1UPhMvZb16Q9EwS-dDWgZL7Dct2eqAA en: /home/fayfer/Documentos/Clase_1-12-noviembre-2025.pdf
+[0] [2026-08-03T00:15:49.749Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Clase_1-12-noviembre-2025.pdf
+[0] [2026-08-03T00:15:51.593Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Clase_1-12-noviembre-2025.pdf.syncclient-download-1785716149749-43325318-2805-49fa-8e0a-fb5b09ba42f7 a /home/fayfer/Documentos/Clase_1-12-noviembre-2025.pdf
+[0] [2026-08-03T00:15:51.594Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1waXBCkbxv4NwGQr4KxNhKIBx50hj9Jo2 en: /home/fayfer/Documentos/Clases 5.pdf
+[0] [2026-08-03T00:15:51.594Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Clases 5.pdf
+[0] [2026-08-03T00:15:54.819Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Clases 5.pdf.syncclient-download-1785716151595-1e8652b3-66ca-4f6a-bc4c-8880bbbf109b a /home/fayfer/Documentos/Clases 5.pdf
+[0] [2026-08-03T00:15:54.820Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1UJ5q_sVjxdwi4Mg42T4qTHkzgyvnmUrq en: /home/fayfer/Documentos/Cálculos del Grassmaniano.pdf
+[0] [2026-08-03T00:15:54.820Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Cálculos del Grassmaniano.pdf
+[0] [2026-08-03T00:15:56.308Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Cálculos del Grassmaniano.pdf.syncclient-download-1785716154821-79ff77f1-0fc9-4ec7-801c-bf19a17c0238 a /home/fayfer/Documentos/Cálculos del Grassmaniano.pdf
+[0] [2026-08-03T00:15:56.309Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 19Vq6A_gNcw9yLk6ySCQ_a_pc1HNRA-rJ en: /home/fayfer/Documentos/EDP-Evans.pdf
+[0] [2026-08-03T00:15:56.309Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/EDP-Evans.pdf
+[0] [2026-08-03T00:15:58.693Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/EDP-Evans.pdf.syncclient-download-1785716156310-633989f8-3175-44c6-bde3-46c551c29703 a /home/fayfer/Documentos/EDP-Evans.pdf
+[0] [2026-08-03T00:15:58.694Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Cz1pMG90biNgkXCHPI0MzB28NWeUcGbb en: /home/fayfer/Documentos/Esame-3.pdf
+[0] [2026-08-03T00:15:58.694Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Esame-3.pdf
+[0] [2026-08-03T00:16:00.664Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Esame-3.pdf.syncclient-download-1785716158695-f5bf4841-230d-41e4-9d1f-46fd2c8fd105 a /home/fayfer/Documentos/Esame-3.pdf
+[0] [2026-08-03T00:16:00.666Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1TJm4olxo1QRnzlfY8AJgninic4DMFGOZ en: /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-03T00:16:00.666Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-03T00:16:01.467Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Firma.jpg.syncclient-download-1785716160667-59c3eb72-308f-485b-a63f-a88f2742654f a /home/fayfer/Documentos/Firma.jpg
+[0] [2026-08-03T00:16:01.469Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1g55CUR6yptgOavUU4xAQkGjPCi1ocRZ3 en: /home/fayfer/Documentos/Grupo de Trabajo_ Geometría Algebraica.pdf
+[0] [2026-08-03T00:16:01.469Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Grupo de Trabajo_ Geometría Algebraica.pdf
+[0] [2026-08-03T00:16:03.682Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Grupo de Trabajo_ Geometría Algebraica.pdf.syncclient-download-1785716161470-4617c970-01c7-4ea7-a0f4-78dcf921ce31 a /home/fayfer/Documentos/Grupo de Trabajo_ Geometría Algebraica.pdf
+[0] [2026-08-03T00:16:03.683Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 18Mo-C7SCbQI9z3V2QLWAH8ntVoOqVnVX en: /home/fayfer/Documentos/Huybretchs.pdf
+[0] [2026-08-03T00:16:03.683Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Huybretchs.pdf
+[0] [2026-08-03T00:16:04.315Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Huybretchs.pdf.syncclient-download-1785716163684-56988199-d630-41d1-8677-932a08fcbc55 a /home/fayfer/Documentos/Huybretchs.pdf
+[0] [2026-08-03T00:16:04.318Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1DsndJaNXAzpivQzpikBV1QVYraJng-XM en: /home/fayfer/Documentos/IMCA - Álgebra Lineal - Hoja 1.pdf
+[0] [2026-08-03T00:16:04.318Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/IMCA - Álgebra Lineal - Hoja 1.pdf
+[0] [2026-08-03T00:16:07.468Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/IMCA - Álgebra Lineal - Hoja 1.pdf.syncclient-download-1785716164319-d3445b1c-3752-4faf-bd61-f73c6ddc4dc6 a /home/fayfer/Documentos/IMCA - Álgebra Lineal - Hoja 1.pdf
+[0] [2026-08-03T00:16:07.470Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 12erAAzlFyAecxn-7xefVB3PJ3dEHz-J5 en: /home/fayfer/Documentos/IMCA - Álgebra Lineal.pdf
+[0] [2026-08-03T00:16:07.470Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/IMCA - Álgebra Lineal.pdf
+[0] [2026-08-03T00:16:09.943Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/IMCA - Álgebra Lineal.pdf.syncclient-download-1785716167471-09b80be5-fbe1-4a51-9a5f-997099acbfd9 a /home/fayfer/Documentos/IMCA - Álgebra Lineal.pdf
+[0] [2026-08-03T00:16:09.945Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 18fEOis-q3IPj03AXR0l2si6HA_SpnJ2g en: /home/fayfer/Documentos/Lee - Smooth Manifolds - Cap 1.pdf
+[0] [2026-08-03T00:16:09.945Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Lee - Smooth Manifolds - Cap 1.pdf
+[0] [2026-08-03T00:16:11.747Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Lee - Smooth Manifolds - Cap 1.pdf.syncclient-download-1785716169946-ef6ec808-235d-4157-9998-851f70e68443 a /home/fayfer/Documentos/Lee - Smooth Manifolds - Cap 1.pdf
+[0] [2026-08-03T00:16:11.749Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1r7ji_Vx9g2xih4lJxW4E_UuPDxX1V_c2 en: /home/fayfer/Documentos/Luana.pdf
+[0] [2026-08-03T00:16:11.749Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Luana.pdf
+[0] [2026-08-03T00:16:16.097Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Luana.pdf.syncclient-download-1785716171749-ecaed2ed-1f1b-4357-8d93-3353c221b90a a /home/fayfer/Documentos/Luana.pdf
+[0] [2026-08-03T00:16:16.099Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 19t7Grgl2Aj7JS3JjiBmnWMZ4dN4gID3X en: /home/fayfer/Documentos/Múltiples notas.zip
+[0] [2026-08-03T00:16:16.099Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Múltiples notas.zip
+[0] [2026-08-03T00:16:18.068Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Múltiples notas.zip.syncclient-download-1785716176100-26dac1df-ca87-4dc4-9061-214375149e98 a /home/fayfer/Documentos/Múltiples notas.zip
+[0] [2026-08-03T00:16:18.069Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1OjPt0k6ANDQ41VIfqv_j9kUhSeJVqruQ en: /home/fayfer/Documentos/Nota Rápida 1.pdf
+[0] [2026-08-03T00:16:18.069Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota Rápida 1.pdf
+[0] [2026-08-03T00:16:20.138Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota Rápida 1.pdf.syncclient-download-1785716178070-d71ec82f-c157-429b-96f6-d3ccfac892da a /home/fayfer/Documentos/Nota Rápida 1.pdf
+[0] [2026-08-03T00:16:20.141Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1lTTXB-6g4zZdHbkvhWhy5BgZr3PE_d7q en: /home/fayfer/Documentos/Nota Rápida.pdf
+[0] [2026-08-03T00:16:20.141Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota Rápida.pdf
+[0] [2026-08-03T00:16:24.078Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota Rápida.pdf.syncclient-download-1785716180143-49af19dc-0186-4234-b7e7-dc802c63581b a /home/fayfer/Documentos/Nota Rápida.pdf
+[0] [2026-08-03T00:16:24.080Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1aWjHacYe-OFeIiWSeenqq1uyzzthvNaE en: /home/fayfer/Documentos/Nota rápida1.pdf
+[0] [2026-08-03T00:16:24.080Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida1.pdf
+[0] [2026-08-03T00:16:26.221Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida1.pdf.syncclient-download-1785716184081-49ffe1c1-aa74-4d33-9273-de607b87d03f a /home/fayfer/Documentos/Nota rápida1.pdf
+[0] [2026-08-03T00:16:26.222Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1tLivLb7P6UZ_adpejRU4LfGFaU9sjrrI en: /home/fayfer/Documentos/Nota rápida18.pdf
+[0] [2026-08-03T00:16:26.222Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida18.pdf
+[0] [2026-08-03T00:16:28.454Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida18.pdf.syncclient-download-1785716186223-cbb4cdb6-febf-43c8-b946-97b717dbf92d a /home/fayfer/Documentos/Nota rápida18.pdf
+[0] [2026-08-03T00:16:28.456Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1YNeWH9amkkBV5kknTSX6ikim7AR14R1l en: /home/fayfer/Documentos/Nota rápida19.pdf
+[0] [2026-08-03T00:16:28.456Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida19.pdf
+[0] [2026-08-03T00:16:30.890Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida19.pdf.syncclient-download-1785716188457-90bf5d7b-2650-4344-b846-7323caa28bac a /home/fayfer/Documentos/Nota rápida19.pdf
+[0] [2026-08-03T00:16:30.891Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1xCq0rhITf-ysZVwTMDVo-nccsrp3-JWX en: /home/fayfer/Documentos/Nota rápida28.pdf
+[0] [2026-08-03T00:16:30.891Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida28.pdf
+[0] [2026-08-03T00:16:33.820Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida28.pdf.syncclient-download-1785716190892-0f92ecd1-320f-4516-a0be-bbbcc65d4fa5 a /home/fayfer/Documentos/Nota rápida28.pdf
+[0] [2026-08-03T00:16:33.821Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1AKzMZwjtee4VcwIack7cSaSOEuyF603W en: /home/fayfer/Documentos/Nota rápida30.pdf
+[0] [2026-08-03T00:16:33.821Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida30.pdf
+[0] [2026-08-03T00:16:34.397Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida30.pdf.syncclient-download-1785716193822-fadb73a4-d115-423f-a5bd-079475d42fe7 a /home/fayfer/Documentos/Nota rápida30.pdf
+[0] [2026-08-03T00:16:34.399Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 14ywWGQXWdlSfA85ltg3XLZIaZDeXDZY2 en: /home/fayfer/Documentos/Nota rápida5.pdf
+[0] [2026-08-03T00:16:34.399Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida5.pdf
+[0] [2026-08-03T00:16:35.971Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida5.pdf.syncclient-download-1785716194401-c5647419-d80a-4e37-be86-270f09e405fd a /home/fayfer/Documentos/Nota rápida5.pdf
+[0] [2026-08-03T00:16:35.973Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1IApMJLTT2IBCFfKd-YAJeNTfNcP11UEC en: /home/fayfer/Documentos/Nota rápida7.pdf
+[0] [2026-08-03T00:16:35.973Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota rápida7.pdf
+[0] [2026-08-03T00:16:38.590Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota rápida7.pdf.syncclient-download-1785716195974-36df6388-f9f5-464a-8c7e-3c57b8146091 a /home/fayfer/Documentos/Nota rápida7.pdf
+[0] [2026-08-03T00:16:38.594Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1Rgeg8GnOtvUZVBz-uBpxROAG8aVp5p9h en: /home/fayfer/Documentos/Nota sin nombre.pdf
+[0] [2026-08-03T00:16:38.595Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota sin nombre.pdf
+[0] [2026-08-03T00:16:41.720Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota sin nombre.pdf.syncclient-download-1785716198596-b9410684-c1e5-4d4f-b082-7c4b613c6b90 a /home/fayfer/Documentos/Nota sin nombre.pdf
+[0] [2026-08-03T00:16:41.722Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1KkIrOaPNZXrX0J4gA3rv1M1oBgaS55Jz en: /home/fayfer/Documentos/Nota sin nombre7.pdf
+[0] [2026-08-03T00:16:41.722Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Nota sin nombre7.pdf
+[0] [2026-08-03T00:16:42.324Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Nota sin nombre7.pdf.syncclient-download-1785716201723-21ca72e2-3981-4b2c-99f1-5118a92c8392 a /home/fayfer/Documentos/Nota sin nombre7.pdf
+[0] [2026-08-03T00:16:42.326Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1AxqW9KfoMl3gCXft7bftukfT5oBYHSQX en: /home/fayfer/Documentos/PD1 - Ayudantía.pdf
+[0] [2026-08-03T00:16:42.326Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/PD1 - Ayudantía.pdf
+[0] [2026-08-03T00:16:43.200Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/PD1 - Ayudantía.pdf.syncclient-download-1785716202326-297768ab-de21-4866-a811-0d6bb03eff47 a /home/fayfer/Documentos/PD1 - Ayudantía.pdf
+[0] [2026-08-03T00:16:43.202Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1r_B6dwg7DjStILPPEkSvM5PtnQqC4T6a en: /home/fayfer/Documentos/PD1_1.pdf
+[0] [2026-08-03T00:16:43.202Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/PD1_1.pdf
+[0] [2026-08-03T00:16:45.666Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/PD1_1.pdf.syncclient-download-1785716203203-d665ab26-f42b-4423-8ffd-5b3e6fb0a534 a /home/fayfer/Documentos/PD1_1.pdf
+[0] [2026-08-03T00:16:45.668Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1twJ_VEEb7v7g23Oo_TNA8HKAWQjLapJY en: /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018  EXTENSO DE LA ESCUELA PROFESIONAL DE MATEMÁTICA.pdf
+[0] [2026-08-03T00:16:45.669Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018  EXTENSO DE LA ESCUELA PROFESIONAL DE MATEMÁTICA.pdf
+[0] [2026-08-03T00:16:47.465Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018  EXTENSO DE LA ESCUELA PROFESIONAL DE MATEMÁTICA.pdf.syncclient-download-1785716205669-e0b11232-c2a9-49af-a6a8-7e6f06f79d0b a /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018  EXTENSO DE LA ESCUELA PROFESIONAL DE MATEMÁTICA.pdf
+[0] [2026-08-03T00:16:47.468Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1aHiWeeAwuQrVK-Z-OsohmNSE1ASRn2dt en: /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018 ESCUELA PROFESIONAL DE FÍSICA.pdf
+[0] [2026-08-03T00:16:47.468Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018 ESCUELA PROFESIONAL DE FÍSICA.pdf
+[0] [2026-08-03T00:16:53.074Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018 ESCUELA PROFESIONAL DE FÍSICA.pdf.syncclient-download-1785716207469-a2373a1e-9edf-464d-91b3-33ef1420bfa7 a /home/fayfer/Documentos/PLAN DE ESTUDIOS 2018 ESCUELA PROFESIONAL DE FÍSICA.pdf
+[0] [2026-08-03T00:16:53.076Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1nZJqI2fSgHYlP_UpdKU5CPQcDHc7FNF7 en: /home/fayfer/Documentos/Problemas-Lineal.pdf
+[0] [2026-08-03T00:16:53.076Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Problemas-Lineal.pdf
+[0] [2026-08-03T00:16:55.055Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Problemas-Lineal.pdf.syncclient-download-1785716213077-73dff4d3-ab33-4589-acfd-175cd89b7189 a /home/fayfer/Documentos/Problemas-Lineal.pdf
+[0] [2026-08-03T00:16:55.058Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 16-ir5qOj1knx4fOGs1gqrGzhip56DtXx en: /home/fayfer/Documentos/Prueba de entrada AC 2026-1.pdf
+[0] [2026-08-03T00:16:55.058Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Prueba de entrada AC 2026-1.pdf
+[0] [2026-08-03T00:16:56.677Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Prueba de entrada AC 2026-1.pdf.syncclient-download-1785716215059-bad3b2c4-75ad-41cb-a40a-bf7cf16a3865 a /home/fayfer/Documentos/Prueba de entrada AC 2026-1.pdf
+[0] [2026-08-03T00:16:56.680Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1DTsfN9xmCwOCfSbWJb-35ztfg5XNNH2c en: /home/fayfer/Documentos/Real-Analysis-Cap-2.pdf
+[0] [2026-08-03T00:16:56.680Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Real-Analysis-Cap-2.pdf
+[0] [2026-08-03T00:17:00.238Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Real-Analysis-Cap-2.pdf.syncclient-download-1785716216680-31f6f28f-0dbc-4bb9-b950-5885e7a354d2 a /home/fayfer/Documentos/Real-Analysis-Cap-2.pdf
+[0] [2026-08-03T00:17:00.241Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1RE9tX9xpt-zBlVyOBYFMX9xBzP7GmVpX en: /home/fayfer/Documentos/Real-Analysis_Apuntes-Clase3-preliminar.pdf
+[0] [2026-08-03T00:17:00.241Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Real-Analysis_Apuntes-Clase3-preliminar.pdf
+[0] [2026-08-03T00:17:05.454Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Real-Analysis_Apuntes-Clase3-preliminar.pdf.syncclient-download-1785716220242-1c668320-6230-4111-b269-e7a2149c2eee a /home/fayfer/Documentos/Real-Analysis_Apuntes-Clase3-preliminar.pdf
+[0] [2026-08-03T00:17:05.457Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1D-yt_liZ912g8n10zSO1NxF13DCPP0zS en: /home/fayfer/Documentos/Real-Analysis_Apuntes.pdf
+[0] [2026-08-03T00:17:05.457Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Real-Analysis_Apuntes.pdf
+[0] [2026-08-03T00:17:10.576Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Real-Analysis_Apuntes.pdf.syncclient-download-1785716225458-db6ab163-e7ea-4f32-a631-3eae05ba7bce a /home/fayfer/Documentos/Real-Analysis_Apuntes.pdf
+[0] [2026-08-03T00:17:10.578Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1NMbpV9VytX1WMLL1HL91v-5khQJHUX7B en: /home/fayfer/Documentos/Rotman.pdf
+[0] [2026-08-03T00:17:10.578Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Rotman.pdf
+[0] [2026-08-03T00:17:15.491Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Rotman.pdf.syncclient-download-1785716230579-004a1130-c3cb-4da0-b931-286a3f8bab83 a /home/fayfer/Documentos/Rotman.pdf
+[0] [2026-08-03T00:17:15.493Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1eZkpO4RrAE3VDwoBu_9OZ0y3dlGmoKcB en: /home/fayfer/Documentos/Sesión .pdf
+[0] [2026-08-03T00:17:15.493Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Sesión .pdf
+[0] [2026-08-03T00:17:17.647Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Sesión .pdf.syncclient-download-1785716235493-d8413745-6729-446f-b16f-a8f2f37e9e4b a /home/fayfer/Documentos/Sesión .pdf
+[0] [2026-08-03T00:17:17.664Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1HyrYzfzR5M1p3sSlRR9lxB3Q4yHpXN2R en: /home/fayfer/Documentos/Sesión 1_.pdf
+[0] [2026-08-03T00:17:17.664Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Sesión 1_.pdf
+[0] [2026-08-03T00:17:20.113Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Sesión 1_.pdf.syncclient-download-1785716237666-2d3c6b8a-58f1-4655-b9fc-f7745e699165 a /home/fayfer/Documentos/Sesión 1_.pdf
+[0] [2026-08-03T00:17:20.131Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1lOaiuSQ1oI303GGggkz6Sf2fttnz6ArV en: /home/fayfer/Documentos/Sesión 2_ Sucesiones, Series y Convergencia Uniforme.pdf
+[0] [2026-08-03T00:17:20.132Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Sesión 2_ Sucesiones, Series y Convergencia Uniforme.pdf
+[0] [2026-08-03T00:17:22.163Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Sesión 2_ Sucesiones, Series y Convergencia Uniforme.pdf.syncclient-download-1785716240133-33262144-622c-4d7d-9ca9-fec12706592b a /home/fayfer/Documentos/Sesión 2_ Sucesiones, Series y Convergencia Uniforme.pdf
+[0] [2026-08-03T00:17:22.166Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1k_byfLyrq9KLXpNvsMca-xSHmc6kpplL en: /home/fayfer/Documentos/Sesión 3_.pdf
+[0] [2026-08-03T00:17:22.166Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Sesión 3_.pdf
+[0] [2026-08-03T00:17:24.650Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Sesión 3_.pdf.syncclient-download-1785716242167-3c9e85e2-b438-4667-a325-f4868039bdaa a /home/fayfer/Documentos/Sesión 3_.pdf
+[0] [2026-08-03T00:17:24.652Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1wyT_wUSivXRAQhBj5e7OvmJUtIJFtyp1 en: /home/fayfer/Documentos/Sesión 4.pdf
+[0] [2026-08-03T00:17:24.652Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Sesión 4.pdf
+[0] [2026-08-03T00:17:28.300Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Sesión 4.pdf.syncclient-download-1785716244653-10ea59ca-23b7-448c-a31a-aab88d794133 a /home/fayfer/Documentos/Sesión 4.pdf
+[0] [2026-08-03T00:17:28.302Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1EnjYkmuA1j-e-uZ6nzZhkhIJBCmvw18y en: /home/fayfer/Documentos/Solucionario.pdf
+[0] [2026-08-03T00:17:28.302Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Solucionario.pdf
+[0] [2026-08-03T00:17:30.146Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Solucionario.pdf.syncclient-download-1785716248303-335924db-07ac-4aed-99b4-aa29b5a8a4c6 a /home/fayfer/Documentos/Solucionario.pdf
+[0] [2026-08-03T00:17:30.148Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 14sVNIBa1f86prbR-TBITnEW37qz9JCvP en: /home/fayfer/Documentos/Soluciones.pdf
+[0] [2026-08-03T00:17:30.148Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Soluciones.pdf
+[0] [2026-08-03T00:17:31.824Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Soluciones.pdf.syncclient-download-1785716250149-49a83f8f-838f-4d99-9e14-bcf6d9953a88 a /home/fayfer/Documentos/Soluciones.pdf
+[0] [2026-08-03T00:17:31.826Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1_Du4lEYxmJELf5DPBCXijH85Moqt8koQ en: /home/fayfer/Documentos/Spanier - Apuntes.pdf
+[0] [2026-08-03T00:17:31.826Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Spanier - Apuntes.pdf
+[0] [2026-08-03T00:17:33.675Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Spanier - Apuntes.pdf.syncclient-download-1785716251827-d0d84528-4c73-4726-80f3-7dda6d329b11 a /home/fayfer/Documentos/Spanier - Apuntes.pdf
+[0] [2026-08-03T00:17:33.677Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1K8VqpEY3tbWIIH97AqSHlTRxRhkbZoIF en: /home/fayfer/Documentos/Taller_ Teoría de Categorías.pdf
+[0] [2026-08-03T00:17:33.677Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Taller_ Teoría de Categorías.pdf
+[0] [2026-08-03T00:17:36.082Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Taller_ Teoría de Categorías.pdf.syncclient-download-1785716253678-822f7a68-f788-45cf-af12-31b40b72b3de a /home/fayfer/Documentos/Taller_ Teoría de Categorías.pdf
+[0] [2026-08-03T00:17:36.084Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1uuWV4YPloqyDTmCw3meBC3sTU9VkS7hk en: /home/fayfer/Documentos/Teoría Algebraica de Números_stewart.pdf
+[0] [2026-08-03T00:17:36.084Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Teoría Algebraica de Números_stewart.pdf
+[0] [2026-08-03T00:17:39.801Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Teoría Algebraica de Números_stewart.pdf.syncclient-download-1785716256084-af7540db-d04b-4912-a6a6-828fdeca2739 a /home/fayfer/Documentos/Teoría Algebraica de Números_stewart.pdf
+[0] [2026-08-03T00:17:39.804Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1HOosbjNNHD9VO72oELY34Huckpdj3jaR en: /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-03T00:17:39.804Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-03T00:17:48.075Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf.syncclient-download-1785716259805-bc2318a1-b2a5-4a18-914e-fd9deba28106 a /home/fayfer/Documentos/Teoría de la Medida_Athreya.pdf
+[0] [2026-08-03T00:17:48.077Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1tv3sv-LIRts0KCo1ueWFhrzRtb0qT0Vo en: /home/fayfer/Documentos/Teoría-Categorias.pdf
+[0] [2026-08-03T00:17:48.077Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Teoría-Categorias.pdf
+[0] [2026-08-03T00:17:50.339Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Teoría-Categorias.pdf.syncclient-download-1785716268078-ca378085-b040-4517-ac92-83632b60f526 a /home/fayfer/Documentos/Teoría-Categorias.pdf
+[0] [2026-08-03T00:17:50.341Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1meF1NYwkcUsB02o1xCWt1W0WbAw6cNpK en: /home/fayfer/Documentos/Tesis.bib
+[0] [2026-08-03T00:17:50.341Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Tesis.bib
+[0] [2026-08-03T00:17:51.035Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Tesis.bib.syncclient-download-1785716270342-874a42ba-1468-499e-9f20-179fc6027055 a /home/fayfer/Documentos/Tesis.bib
+[0] [2026-08-03T00:17:51.037Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1d7EJSPqoLW8Tpfc9AT9kTsoYlF92hTOG en: /home/fayfer/Documentos/Variational Analysis - Rockafellar.pdf
+[0] [2026-08-03T00:17:51.037Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/Variational Analysis - Rockafellar.pdf
+[0] [2026-08-03T00:17:53.075Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/Variational Analysis - Rockafellar.pdf.syncclient-download-1785716271038-cd658a16-cc12-46ab-840d-c4885ec3c4a6 a /home/fayfer/Documentos/Variational Analysis - Rockafellar.pdf
+[0] [2026-08-03T00:17:53.077Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1WNJTDrWCxuVK8B92RIlpu40CXANQJhSU en: /home/fayfer/Documentos/zshrc.txt
+[0] [2026-08-03T00:17:53.077Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/zshrc.txt
+[0] [2026-08-03T00:17:53.853Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/zshrc.txt.syncclient-download-1785716273079-345b9031-a6c2-4151-ad2a-de8c5c937703 a /home/fayfer/Documentos/zshrc.txt
+[0] [2026-08-03T00:17:53.856Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 127 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:18:25.644Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 7 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:18:27.603Z] [WARN ] [SyncEngine] [SyncEngine] pair=w49cxfp8c retained incomplete transfer state; cursor will not advance
+[0] [2026-08-03T00:18:27.604Z] [ERROR] [SyncEngine] [SyncEngine] pair=w49cxfp8c sync failed; recoverable state was retained: Native sync did not complete; pending work was retained
+[0] Error: Native sync did not complete; pending work was retained
+[0]     at SyncEngine.runSync (/home/fayfer/Projectos-Programacion/SyncClient-V1/src/backend/syncEngine.ts:1027:11)
+[0] [2026-08-03T00:18:33.249Z] [WARN ] [SyncEngine] [Recovery] Se encontraron 3 transferencias incompletas para pair=w49cxfp8c. Limpiando para un nuevo intento.
+[0] [2026-08-03T00:19:23.901Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 1rP0zvro-Roo3UNE4JCnfHctO50UL2NL- en: /home/fayfer/Documentos/.ttxfolder
+[0] [2026-08-03T00:19:23.901Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/.ttxfolder
+[0] [2026-08-03T00:19:24.750Z] [INFO ] [Transfer] [Transfer] Descarga completada y verificada. Renombrando /home/fayfer/Documentos/.ttxfolder.syncclient-download-1785716363901-790b2308-6f9e-466e-991f-1ac3d35f00e8 a /home/fayfer/Documentos/.ttxfolder
+[0] [2026-08-03T00:19:24.759Z] [INFO ] [SyncEngine] Iniciando descarga binaria para fileId: 10yvRWFsM5ga03RSXX5CQhIrpY_6KwrjD en: /home/fayfer/Documentos/02-maraton.pdf
+[0] [2026-08-03T00:19:24.759Z] [INFO ] [Transfer] [Transfer] Iniciando descarga atómica para: /home/fayfer/Documentos/02-maraton.pdf
