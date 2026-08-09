@@ -108,6 +108,7 @@ export class SyncEngine {
   private pendingResync = new Set<string>();
   private activeTransfers = new Set<string>();
   private activeTransferProgress = new Map<string, number>();
+  private completedBytesByPair: Record<string, number> = {};
   private dedupCancelled = new Set<string>();
   private watcherRetryCount: Record<string, number> = {};
   private debounceTimers: Record<string, NodeJS.Timeout> = {};
@@ -1728,6 +1729,7 @@ export class SyncEngine {
 
   private async runSync(pair: SyncPair, pairLock: PairLock): Promise<void> {
     const pairId = pair.id;
+    this.completedBytesByPair[pairId] = 0;
 
     // --- BIFURCACIÓN DE MOTOR: SI EL PAR USA RCLONE ---
     if (pair.engineType === 'rclone') {
@@ -2830,9 +2832,6 @@ export class SyncEngine {
     }
     checkInterrupt();
 
-    // Mapa para rastrear los bytes de archivos completados sin duplicar reintentos
-    let completedBytesInPair = 0;
-
     const uploadTasks = plan.uploads.map(upload => async (): Promise<void> => {
       if ((pair.status as string) === 'paused') return;
       const fullLocalPath = path.join(localDir, upload.localPath);
@@ -2877,7 +2876,7 @@ export class SyncEngine {
                 const currentActiveTotal = Array.from(this.activeTransferProgress.entries())
                   .filter(([k]) => k.startsWith(`${pair.id}:`))
                   .reduce((sum, [, bytes]) => sum + bytes, 0);
-                pair.progress.bytesTransferred = Math.min(completedBytesInPair + currentActiveTotal, pair.progress.totalBytes);
+                pair.progress.bytesTransferred = Math.min((this.completedBytesByPair[pair.id] || 0) + currentActiveTotal, pair.progress.totalBytes);
                 if (pair.progress.totalBytes > 0) {
                   pair.progress.percentage = Math.min(99, Math.round((pair.progress.bytesTransferred / pair.progress.totalBytes) * 100));
                 }
@@ -2885,7 +2884,7 @@ export class SyncEngine {
             }
           );
 
-          completedBytesInPair += stats.size;
+          this.completedBytesByPair[pair.id] = (this.completedBytesByPair[pair.id] || 0) + stats.size;
           upload.remoteId = uploadedFile.id;
           (upload as any).remoteMtime = new Date(uploadedFile.modifiedTime).getTime();
           (upload as any).remoteSize = uploadedFile.size ? parseInt(uploadedFile.size, 10) : stats.size;
@@ -2896,7 +2895,7 @@ export class SyncEngine {
           completedUploads.add(upload.localPath);
           if (pair.progress) {
             pair.progress.currentFileIndex = Math.min((pair.progress.currentFileIndex || 0) + 1, pair.progress.totalFiles);
-            pair.progress.bytesTransferred = Math.min(completedBytesInPair, pair.progress.totalBytes);
+            pair.progress.bytesTransferred = Math.min(this.completedBytesByPair[pair.id] || 0, pair.progress.totalBytes);
           }
 
           this.addEvent({
@@ -2971,7 +2970,7 @@ export class SyncEngine {
                 const currentActiveTotal = Array.from(this.activeTransferProgress.entries())
                   .filter(([k]) => k.startsWith(`${pair.id}:`))
                   .reduce((sum, [, bytes]) => sum + bytes, 0);
-                pair.progress.bytesTransferred = Math.min(completedBytesInPair + currentActiveTotal, pair.progress.totalBytes > 0 ? pair.progress.totalBytes : currentActiveTotal);
+                pair.progress.bytesTransferred = Math.min((this.completedBytesByPair[pair.id] || 0) + currentActiveTotal, pair.progress.totalBytes > 0 ? pair.progress.totalBytes : currentActiveTotal);
                 
                 if (pair.progress.totalBytes > 0) {
                   pair.progress.percentage = Math.min(99, Math.round((pair.progress.bytesTransferred / pair.progress.totalBytes) * 100));
@@ -2985,13 +2984,13 @@ export class SyncEngine {
 
         const downloadedStats = await fs.stat(fullLocalPath);
         downloadedLocalMtimes.set(download.localPath, downloadedStats?.mtimeMs ?? Date.now());
-        completedBytesInPair += fileSize;
+        this.completedBytesByPair[pair.id] = (this.completedBytesByPair[pair.id] || 0) + fileSize;
 
         downloadCommits.push({ journalId, operationId });
         completedDownloads.add(download.localPath);
         if (pair.progress) {
           pair.progress.currentFileIndex = Math.min((pair.progress.currentFileIndex || 0) + 1, pair.progress.totalFiles);
-          pair.progress.bytesTransferred = Math.min(completedBytesInPair, pair.progress.totalBytes);
+          pair.progress.bytesTransferred = Math.min(this.completedBytesByPair[pair.id] || 0, pair.progress.totalBytes);
         }
         this.addEvent({
           id: Math.random().toString(36).substr(2, 9),
