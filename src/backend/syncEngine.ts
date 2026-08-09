@@ -939,6 +939,41 @@ export class SyncEngine {
       }
     }
 
+    if (conflict.reason === 'MASS_DELETION_APPROVAL_REQUIRED') {
+      if (effective === 'local') {
+        this.logger.info(`[ResolveConflict] Borrado masivo confirmado por el usuario para pair=${pair.id}. Marcando archivos como tombstones.`);
+        if (this.db) {
+          const folderStates = this.db.getFolderState(pair.id);
+          if (folderStates) {
+            for (const [relPath, state] of folderStates) {
+              if (!state.is_tombstone) {
+                this.db.setFileState(pair.id, relPath, { ...state, is_tombstone: 1, updated_at: Date.now() });
+              }
+            }
+          }
+        }
+      } else if (effective === 'remote') {
+        this.logger.info(`[ResolveConflict] Restauración de borrado masivo solicitada para pair=${pair.id}. Se descargarán los archivos de Drive en el próximo ciclo.`);
+      } else {
+        this.logger.info(`[ResolveConflict] Borrado masivo omitido para pair=${pair.id}. Marcando archivos como tombstones.`);
+        if (this.db) {
+          const folderStates = this.db.getFolderState(pair.id);
+          if (folderStates) {
+            for (const [relPath, state] of folderStates) {
+              if (!state.is_tombstone) {
+                this.db.setFileState(pair.id, relPath, { ...state, is_tombstone: 1, updated_at: Date.now() });
+              }
+            }
+          }
+        }
+      }
+
+      this.pendingConflicts = this.pendingConflicts.filter(c => c.id !== conflictId);
+      if (this.db) this.db.resolveConflict(conflictId, effective);
+      await this.saveState();
+      return;
+    }
+
     const parentDir = path.dirname(conflict.localPath);
     const relParentDir = parentDir === '.' ? '' : parentDir;
     const remoteFolderId = await this.ensureRemoteFolderPath(pair, relParentDir);
@@ -2596,23 +2631,28 @@ export class SyncEngine {
     // Safeguard: Deletion Protection Guard (Gestión amigable sin excepciones colapsantes)
     const deletionsCount = plan.deleteLocal.length + plan.deleteRemote.length;
     const totalKnownFiles = dbStateForPlan.size;
+    const conflictId = `mass_del_${pair.id}`;
+
     if (totalKnownFiles > 10 && (deletionsCount > 100 || (deletionsCount > 5 && deletionsCount / totalKnownFiles > 0.4))) {
-      this.logger.warn(`[SafetyGuard] Intento de borrado masivo detectado en ${pair.id} (${deletionsCount}/${totalKnownFiles}). Registrando conflicto interactivo.`);
-      const conflictId = `mass_del_${pair.id}`;
-      if (!this.pendingConflicts.some(c => c.id === conflictId)) {
-        this.pendingConflicts.push({
-          id: conflictId,
-          pairId: pair.id,
-          localPath: relativePrefix || '.',
-          relativePath: relativePrefix || '.',
-          remoteFileId: '',
-          remoteFileName: 'BORRADO_MASIVO_DETECTADO',
-          reason: 'MASS_DELETION_APPROVAL_REQUIRED',
-          baseHash: null, localHash: null, remoteHash: null,
-          localSize: null, localMtime: 0, remoteSize: null, remoteMtime: 0,
-          resolved: false, timestamp: Date.now()
-        });
+      const existingConflict = this.pendingConflicts.find(c => c.id === conflictId);
+      if (existingConflict) {
+        this.logger.info(`[SafetyGuard] Borrado masivo para ${pair.id} ya registrado previamente. Esperando resolución del usuario.`);
+        return false;
       }
+
+      this.logger.warn(`[SafetyGuard] Intento de borrado masivo detectado en ${pair.id} (${deletionsCount}/${totalKnownFiles}). Registrando conflicto interactivo.`);
+      this.pendingConflicts.push({
+        id: conflictId,
+        pairId: pair.id,
+        localPath: relativePrefix || '.',
+        relativePath: relativePrefix || '.',
+        remoteFileId: '',
+        remoteFileName: 'BORRADO_MASIVO_DETECTADO',
+        reason: 'MASS_DELETION_APPROVAL_REQUIRED',
+        baseHash: null, localHash: null, remoteHash: null,
+        localSize: null, localMtime: 0, remoteSize: null, remoteMtime: 0,
+        resolved: false, timestamp: Date.now()
+      });
       return false;
     }
 
