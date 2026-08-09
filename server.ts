@@ -848,6 +848,63 @@ async function startServer() {
     }
   });
 
+  app.get("/api/local/backups", async (req, res) => {
+    try {
+      const pairId = req.query.pairId as string;
+      if (!isValidString(pairId, 256)) return res.status(400).json({ error: "pairId requerido" });
+
+      const pair = syncEngine.getStatus().pairs.find((p: any) => p.id === pairId);
+      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
+
+      const backupDir = path.join(pair.localPath, '.syncclient-backups');
+      let backups: Array<{ name: string; path: string; size: number; mtime: number }> = [];
+
+      try {
+        const dateFolders = await fs.readdir(backupDir, { withFileTypes: true });
+        for (const dateFolder of dateFolders) {
+          if (dateFolder.isDirectory()) {
+            const folderPath = path.join(backupDir, dateFolder.name);
+            const files = await fs.readdir(folderPath, { withFileTypes: true });
+            for (const f of files) {
+              if (f.isFile()) {
+                const fullPath = path.join(folderPath, f.name);
+                const st = await fs.stat(fullPath);
+                backups.push({
+                  name: f.name,
+                  path: fullPath,
+                  size: st.size,
+                  mtime: st.mtimeMs
+                });
+              }
+            }
+          }
+        }
+      } catch { }
+
+      res.json({ backups: backups.sort((a, b) => b.mtime - a.mtime) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/local/backups/restore", async (req, res) => {
+    try {
+      const { backupPath, targetPath } = req.body;
+      if (!isValidString(backupPath, 4096) || !isValidString(targetPath, 4096)) {
+        return res.status(400).json({ error: "Rutas requeridas" });
+      }
+      if (!isPathAllowed(backupPath) || !isPathAllowed(targetPath)) {
+        return res.status(403).json({ error: "Rutas no permitidas" });
+      }
+
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.copyFile(backupPath, targetPath);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Detectar modo producción de forma segura tanto en ESM (tsx) como en CJS (dist/server.cjs o app.asar)
   const isCjs = typeof __filename !== 'undefined';
   const isProduction = process.env.NODE_ENV === "production" || (isCjs && (__filename.endsWith(".cjs") || __dirname.includes("dist") || __dirname.includes("app.asar")));

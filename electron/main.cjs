@@ -43,6 +43,16 @@ let backendProcess = null;
 let backendReady = false;
 let staticContextMenu = null;
 let togglePauseMenuItem = null;
+let pauseTimer = null;
+
+function setTimedPause(hours) {
+  if (pauseTimer) clearTimeout(pauseTimer);
+  sendActionToRenderer('toggle-pause-sync');
+  pauseTimer = setTimeout(() => {
+    sendActionToRenderer('toggle-pause-sync');
+    pauseTimer = null;
+  }, hours * 3600 * 1000);
+}
 
 const secureStorePath = path.join(app.getPath('userData'), 'syncclient-secure-store.json');
 let secureStoreState = {};
@@ -552,7 +562,7 @@ function updateTrayStatus(statusData) {
   } catch (e) { }
 
   if (togglePauseMenuItem) {
-    const targetLabel = isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar Sincronización';
+    const targetLabel = isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar indefinidamente';
     if (togglePauseMenuItem.label !== targetLabel) {
       togglePauseMenuItem.label = targetLabel;
     }
@@ -564,7 +574,7 @@ function createTray() {
   tray = new Tray(image);
 
   togglePauseMenuItem = new MenuItem({
-    label: '⏸️ Pausar Sincronización',
+    label: '⏸️ Pausar indefinidamente',
     click: () => sendActionToRenderer('toggle-pause-sync')
   });
 
@@ -589,7 +599,20 @@ function createTray() {
       label: '⚡ Sincronizar Todo Ahora',
       click: () => sendActionToRenderer('force-sync-all')
     },
-    togglePauseMenuItem,
+    {
+      label: '⏸️ Pausar Sincronización por...',
+      submenu: [
+        {
+          label: '⏱️ Pausar por 1 hora',
+          click: () => setTimedPause(1)
+        },
+        {
+          label: '⏱️ Pausar por 2 horas',
+          click: () => setTimedPause(2)
+        },
+        togglePauseMenuItem,
+      ]
+    },
     {
       label: '✨ Limpiar Duplicados en Carpetas',
       click: () => sendActionToRenderer('clean-duplicates-all')

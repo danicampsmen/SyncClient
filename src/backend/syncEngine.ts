@@ -1917,8 +1917,25 @@ export class SyncEngine {
     }
   }
 
+  private async ensureTokenFreshness(): Promise<boolean> {
+    if (!this.accessToken) return false;
+    if (this.refreshToken) {
+      try {
+        const refreshed = await this.refreshAccessToken();
+        if (refreshed) {
+          this.logger.info('[SyncEngine/Auth] Token de Google Drive renovado proactivamente antes de la transmisión.');
+          return true;
+        }
+      } catch (err) {
+        this.logger.warn('[SyncEngine/Auth] Falló la comprobación proactiva de token:', err);
+      }
+    }
+    return Boolean(this.accessToken);
+  }
+
   public async triggerSync(pairId: string) {
     if (!this.accessToken) return;
+    await this.ensureTokenFreshness();
     const pair = this.pairs.find(p => p.id === pairId);
     if (!pair || pair.status === 'paused') return;
 
