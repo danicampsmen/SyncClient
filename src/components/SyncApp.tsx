@@ -1449,6 +1449,20 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
                   {pair.engineType === 'rclone' ? '🚀 MOTOR RCLONE CLI' : '⚡ MOTOR NATIVO V2'}
                 </span>
 
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-semibold border ${
+                  (pair.direction || 'bidirectional') === 'upload'
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    : (pair.direction || 'bidirectional') === 'download'
+                      ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                      : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                }`}>
+                  {(pair.direction || 'bidirectional') === 'upload'
+                    ? '⬆️ SOLO SUBIDA'
+                    : (pair.direction || 'bidirectional') === 'download'
+                      ? '⬇️ SOLO BAJADA'
+                      : '↔️ BIDIRECCIONAL'}
+                </span>
+
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-medium border ${
                   pair.syncMode === 'streaming'
                     ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
