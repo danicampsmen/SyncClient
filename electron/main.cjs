@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, session, dialog, ipcMain, shell, Notification, safeStorage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, MenuItem, nativeImage, session, dialog, ipcMain, shell, Notification, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -42,7 +42,6 @@ let activeOAuthPromise = null;
 let backendProcess = null;
 let backendReady = false;
 let staticContextMenu = null;
-let togglePauseMenuItem = null;
 let pauseTimer = null;
 
 function setTimedPause(hours) {
@@ -561,10 +560,13 @@ function updateTrayStatus(statusData) {
     tray.setToolTip(tooltipLines.join('\n'));
   } catch (e) { }
 
-  if (togglePauseMenuItem) {
-    const targetLabel = isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar Sincronización';
-    if (togglePauseMenuItem.label !== targetLabel) {
-      togglePauseMenuItem.label = targetLabel;
+  if (staticContextMenu) {
+    const pauseItem = staticContextMenu.getMenuItemById('toggle-pause');
+    if (pauseItem) {
+      const targetLabel = isPaused ? '▶️ Reanudar Sincronización' : '⏸️ Pausar Sincronización';
+      if (pauseItem.label !== targetLabel) {
+        pauseItem.label = targetLabel;
+      }
     }
   }
 }
@@ -572,11 +574,6 @@ function updateTrayStatus(statusData) {
 function createTray() {
   const image = nativeImage.createFromDataURL(iconDataUrl);
   tray = new Tray(image);
-
-  togglePauseMenuItem = new MenuItem({
-    label: '⏸️ Pausar Sincronización',
-    click: () => sendActionToRenderer('toggle-pause-sync')
-  });
 
   staticContextMenu = Menu.buildFromTemplate([
     {
@@ -610,7 +607,11 @@ function createTray() {
           label: '⏱️ Pausar por 2 horas',
           click: () => setTimedPause(2)
         },
-        togglePauseMenuItem,
+        {
+          id: 'toggle-pause',
+          label: '⏸️ Pausar indefinidamente',
+          click: () => sendActionToRenderer('toggle-pause-sync')
+        },
       ]
     },
     {
