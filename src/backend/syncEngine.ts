@@ -3053,6 +3053,13 @@ export class SyncEngine {
     checkInterrupt();
     if ((pair.status as string) === 'paused') return false;
 
+    // FIX DE RAÍZ: Liberar el archivo del progreso al terminar la transmisión de bytes
+    if (pair.progress && pair.progress.bytesTransferred >= pair.progress.totalBytes && pair.progress.totalBytes > 0) {
+      pair.progress.action = 'comprobando';
+      pair.progress.currentFile = 'Verificando subdirectorios...';
+      pair.progress.percentage = 99;
+    }
+
     const completedDeletesLocal = new Set<string>();
     const completedDeletesRemote = new Set<string>();
 

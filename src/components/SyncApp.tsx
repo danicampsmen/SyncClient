@@ -1059,7 +1059,7 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
               )}
               <span className={isActivelySyncing ? 'text-blue-300' : 'text-emerald-300'}>
                 {isActivelySyncing 
-                  ? (isFinalizingDb ? '💾 Guardando cambios en SQLite...' : 'Progreso Total de Bisincronización') 
+                  ? (isFinalizingDb ? '🔍 Verificando estructura de subcarpetas...' : 'Progreso Total de Bisincronización') 
                   : 'Estado de Bisincronización Total'}
               </span>
             </div>
@@ -2559,18 +2559,19 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
   const renderStatusBadge = (event: SyncEvent, pair?: SyncPair) => {
     const isCurrentActiveFile = pair?.progress?.currentFile === event.filename;
     const activeAction = pair?.progress?.action;
+    const isStillTransferring = pair?.progress?.percentage ? pair.progress.percentage < 99 : false;
 
-    if (isCurrentActiveFile && activeAction === 'subiendo') {
+    if (isCurrentActiveFile && activeAction === 'subiendo' && isStillTransferring && event.action !== 'uploaded') {
       return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/50 animate-pulse shadow-sm">
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-400/50 animate-pulse shadow-sm">
           <RefreshCw size={11} className="mr-1.5 animate-spin text-blue-400" /> 🚀 Subiendo...
         </span>
       );
     }
 
-    if (isCurrentActiveFile && activeAction === 'descargando') {
+    if (isCurrentActiveFile && activeAction === 'descargando' && isStillTransferring && event.action !== 'downloaded') {
       return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 animate-pulse shadow-sm">
+        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 animate-pulse shadow-sm">
           <RefreshCw size={11} className="mr-1.5 animate-spin text-emerald-400" /> 📥 Descargando...
         </span>
       );
