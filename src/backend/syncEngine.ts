@@ -2646,6 +2646,8 @@ export class SyncEngine {
     if (pair.direction === 'upload') {
       plan.downloads = [];
       plan.deleteLocal = [];
+      plan.adoptions = [];
+      if (plan.moves) plan.moves = [];
     } else if (pair.direction === 'download') {
       plan.uploads = [];
       plan.deleteRemote = [];

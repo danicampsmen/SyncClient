@@ -69,6 +69,7 @@ function transient(status: number): boolean {
 function invalidCursor(status: number, body: unknown): boolean {
   if (status === 400 || status === 410) return true;
   const text = typeof body === 'string' ? body : JSON.stringify(body);
+  if (typeof text !== 'string') return false;
   return /invalid(page)?token|page token is invalid|start page token/i.test(text);
 }
 

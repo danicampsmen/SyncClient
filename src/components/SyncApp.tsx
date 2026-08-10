@@ -1059,8 +1059,8 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
               )}
               <span className={isActivelySyncing ? 'text-blue-300' : 'text-emerald-300'}>
                 {isActivelySyncing 
-                  ? (isFinalizingDb ? '🔍 Verificando estructura de subcarpetas...' : 'Progreso Total de Bisincronización') 
-                  : 'Estado de Bisincronización Total'}
+                  ? (isFinalizingDb ? '🔍 Verificando estructura de subcarpetas...' : 'Progreso Total de Sincronización') 
+                  : 'Estado de Sincronización Total'}
               </span>
             </div>
 
@@ -1503,7 +1503,9 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
                     )}
                   </span>
                   <span className="text-[10px] text-neutral-500 font-mono">
-                    {pair.lastSynced ? `Sync: ${new Date(pair.lastSynced).toLocaleTimeString()}` : 'Pendiente de inicio'}
+                    {pair.status === 'syncing'
+                      ? 'Sincronizando ahora...'
+                      : (pair.lastSynced ? `Sync: ${new Date(pair.lastSynced).toLocaleTimeString()}` : 'Pendiente de inicio')}
                   </span>
                 </div>
 
@@ -2763,7 +2765,9 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
                           <span>{copiedId === event.id ? '¡Link Copiado!' : 'Copiar URL'}</span>
                         </button>
                       ) : (
-                        <span className="text-neutral-600 text-[11px] font-mono italic">Solo Local</span>
+                        <span className="text-neutral-600 text-[11px] font-mono italic">
+                          {event.action === 'downloaded' || event.action === 'uploaded' ? 'Sincronizado' : 'Solo Local'}
+                        </span>
                       )}
                     </td>
 
