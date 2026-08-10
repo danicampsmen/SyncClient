@@ -38,6 +38,7 @@ try {
 
 import { syncEngine } from "./src/backend/syncEngine";
 import { Logger } from "./src/backend/logger";
+import { CoreSyncLogic } from "./src/shared/CoreSyncLogic";
 
 const CONFIG_DIR = path.join(os.homedir(), ".config", "syncclient");
 const LOG_DIR = path.join(CONFIG_DIR, "logs");

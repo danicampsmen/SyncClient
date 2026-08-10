@@ -73,8 +73,11 @@ export async function acquirePairLock(lockDirectory: string, pairId: string): Pr
   try {
     // Usar O_CREAT | O_EXCL | O_WRONLY para asegurar atomicidad
     const handle = await fs.open(lockPath, 'wx', 0o600);
-    await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
-    await handle.close();
+    try {
+      await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
+    } finally {
+      await handle.close();
+    }
 
     let released = false;
     return {
@@ -93,8 +96,11 @@ export async function acquirePairLock(lockDirectory: string, pairId: string): Pr
         // Intentar crear el lock nuevamente después de reclamar
         try {
           const handle = await fs.open(lockPath, 'wx', 0o600);
-          await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
-          await handle.close();
+          try {
+            await handle.writeFile(JSON.stringify({ pairId, pid: process.pid, startedAt: new Date().toISOString() }));
+          } finally {
+            await handle.close();
+          }
 
           let released = false;
           return {

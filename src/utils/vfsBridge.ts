@@ -282,7 +282,9 @@ export class VFSBridge {
             try {
               const st = await Filesystem.stat({ path: (cleanDir ? cleanDir + '/' : '') + f.name, directory: Directory.ExternalStorage });
               mtime = st.mtime;
-            } catch { }
+            } catch (err: unknown) {
+              logger.debug(`No se pudo obtener stat mtime para ${f.name}:`, err);
+            }
           }
           const match = f.name.match(/^(.+?)(?:\s*\(\s*(\d+)\s*\))+\.([a-zA-Z0-9]+)$/);
           if (match) {
@@ -306,13 +308,17 @@ export class VFSBridge {
 
           for (const loser of losers) {
             const target = (cleanDir ? cleanDir + '/' : '') + loser.name;
-            await Filesystem.deleteFile({ path: target, directory: Directory.ExternalStorage }).catch(() => { });
+            await Filesystem.deleteFile({ path: target, directory: Directory.ExternalStorage }).catch((err: unknown) => {
+              logger.warn(`Error al eliminar versión anterior duplicada ${loser.name}:`, err);
+            });
             deleted++;
           }
           if (winner.name !== baseName) {
             const oldPath = (cleanDir ? cleanDir + '/' : '') + winner.name;
             const newPath = (cleanDir ? cleanDir + '/' : '') + baseName;
-            await Filesystem.rename({ from: oldPath, to: newPath, directory: Directory.ExternalStorage }).catch(() => { });
+            await Filesystem.rename({ from: oldPath, to: newPath, directory: Directory.ExternalStorage }).catch((err: unknown) => {
+              logger.warn(`Error al renombrar ${winner.name} a ${baseName}:`, err);
+            });
             renamed++;
           }
         }

@@ -171,7 +171,9 @@ export class DriveChangesIngestor {
       } catch (error) {
         lastError = error;
         if (attempt === MAX_ATTEMPTS) throw error;
-        await this.sleepFn(Math.min(MAX_BACKOFF_MS, 1000 * (2 ** (attempt - 1))));
+        const baseDelay = Math.min(MAX_BACKOFF_MS, 1000 * (2 ** (attempt - 1)));
+        const jitter = Math.floor(Math.random() * Math.min(1000, baseDelay / 2));
+        await this.sleepFn(Math.min(MAX_BACKOFF_MS, baseDelay + jitter));
         continue;
       }
 
@@ -188,8 +190,10 @@ export class DriveChangesIngestor {
       if (!transient(response.status) || attempt === MAX_ATTEMPTS) {
         throw new Error(`Drive changes request failed (${response.status})`);
       }
+      const baseDelay = Math.min(MAX_BACKOFF_MS, 1000 * (2 ** (attempt - 1)));
+      const jitter = Math.floor(Math.random() * Math.min(1000, baseDelay / 2));
       const delay = retryAfterMs(response.headers.get('retry-after'))
-        ?? Math.min(MAX_BACKOFF_MS, 1000 * (2 ** (attempt - 1)));
+        ?? Math.min(MAX_BACKOFF_MS, baseDelay + jitter);
       await this.sleepFn(delay);
     }
     throw lastError instanceof Error ? lastError : new Error('Drive changes request failed');

@@ -520,7 +520,9 @@ export class SyncEngine {
               }
             }
           }
-        } catch { }
+        } catch (err: unknown) {
+          this.logger.debug(`Error al escanear ruta de medio externo ${base}:`, err);
+        }
       }
     }, 5000);
   }
@@ -1364,7 +1366,9 @@ export class SyncEngine {
       const tmpFile = `${this.configFile}.tmp.${Date.now()}`;
       await fs.writeFile(tmpFile, JSON.stringify(data, null, 2), 'utf8');
       await fs.rename(tmpFile, this.configFile);
-    } catch { }
+    } catch (err: unknown) {
+      this.logger.error('Error al guardar archivo de estado configFile:', err);
+    }
   }
 
   private async listDriveFiles(folderId: string): Promise<DriveFile[]> {
@@ -1727,7 +1731,9 @@ export class SyncEngine {
           }
         });
       });
-    } catch { }
+    } catch (err: unknown) {
+      this.logger.warn('No se pudieron inicializar webhooks de Firebase:', err);
+    }
   }
 }
 
