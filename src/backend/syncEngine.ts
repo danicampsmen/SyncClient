@@ -2369,6 +2369,11 @@ export class SyncEngine {
           const fullLocalPath = path.join(pair.localPath, canonicalRelPath);
 
           if (change) {
+            if (pair.direction === 'upload') {
+              this.logger.debug(`[FastSync] Ignorando evento remoto en ${canonicalRelPath} por modo 'Solo Subida'.`);
+              continue;
+            }
+
             if (change.removed) {
               this.markSelfWritten(fullLocalPath);
               await fs.rm(fullLocalPath, { recursive: true, force: true }).catch(() => {});
@@ -2444,6 +2449,11 @@ export class SyncEngine {
             this.addEvent({ id: Math.random().toString(36).substr(2, 9), pairId: pair.id, filename: remoteFile.name, action: 'downloaded', timestamp: Date.now() }, true);
 
           } else if (localEvent) {
+            if (pair.direction === 'download') {
+              this.logger.debug(`[FastSync] Ignorando evento local en ${canonicalRelPath} por modo 'Solo Descarga'.`);
+              continue;
+            }
+
             const state = this.db.getFileState(pair.id, canonicalRelPath);
 
             let localStat = null;
@@ -2632,6 +2642,15 @@ export class SyncEngine {
 
     const plan = CoreSyncLogic.computeSyncPlan(localSnapshot, remoteSnapshot, dbStateForPlan, this.DEVICE_ID);
     checkInterrupt();
+
+    if (pair.direction === 'upload') {
+      plan.downloads = [];
+      plan.deleteLocal = [];
+    } else if (pair.direction === 'download') {
+      plan.uploads = [];
+      plan.deleteRemote = [];
+      if (plan.moves) plan.moves = [];
+    }
 
     // Safeguard: Deletion Protection Guard (Agrupar borrados por raíz para no bloquear carpetas individuales)
     const deletionsCount = plan.deleteLocal.length + plan.deleteRemote.length;
