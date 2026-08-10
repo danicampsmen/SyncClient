@@ -2902,6 +2902,7 @@ export class SyncEngine {
 
         let activeFileTransferred = 0;
         const transferKey = `${pair.id}:${upload.localPath}`;
+        this.activeTransfers.add(transferKey);
         try {
           const uploadedFile = await this.uploadDriveBinary(
             remoteFolderId, fullLocalPath, upload.remoteName, upload.remoteId, upload.vectorClock, operationId,
@@ -2914,6 +2915,8 @@ export class SyncEngine {
                 pair.progress.bytesTransferred = Math.min((this.completedBytesByPair[pair.id] || 0) + currentActiveTotal, pair.progress.totalBytes);
                 if (pair.progress.totalBytes > 0) {
                   pair.progress.percentage = Math.min(99, Math.round((pair.progress.bytesTransferred / pair.progress.totalBytes) * 100));
+                } else {
+                  pair.progress.percentage = 0;
                 }
               }
             }
@@ -2945,6 +2948,7 @@ export class SyncEngine {
           }, true);
         } finally {
           this.activeTransferProgress.delete(transferKey);
+          this.activeTransfers.delete(transferKey);
         }
       } catch (e: any) {
         if (e && e.code === 'ENOENT') {
@@ -2986,9 +2990,11 @@ export class SyncEngine {
 
       try {
         const transferKey = `${pair.id}:${download.localPath}`;
+        this.activeTransfers.add(transferKey);
         let activeFileTransferred = 0;
         if (!download.remoteFile.id || !download.remoteFile.id.trim()) {
           this.logger.warn(`[Transfer] Omitiendo descarga para '${relPath}': fileId remoto vacío.`);
+          this.activeTransfers.delete(transferKey);
           return;
         }
         try {
@@ -3009,12 +3015,15 @@ export class SyncEngine {
                 
                 if (pair.progress.totalBytes > 0) {
                   pair.progress.percentage = Math.min(99, Math.round((pair.progress.bytesTransferred / pair.progress.totalBytes) * 100));
+                } else {
+                  pair.progress.percentage = 0;
                 }
               }
             }
           );
         } finally {
           this.activeTransferProgress.delete(transferKey);
+          this.activeTransfers.delete(transferKey);
         }
 
         const downloadedStats = await fs.stat(fullLocalPath);
