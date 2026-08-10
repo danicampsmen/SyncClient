@@ -275,6 +275,7 @@ export class SyncEngine {
             attempt--;
             continue;
           }
+          throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
         }
 
         // Si recibimos 429 con Retry-After, respetar la espera indicada por Google

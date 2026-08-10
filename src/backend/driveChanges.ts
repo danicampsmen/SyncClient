@@ -174,9 +174,14 @@ export class DriveChangesIngestor {
         continue;
       }
 
-      const body = await response.text();
+      let body = '';
       let parsed: unknown;
-      try { parsed = body ? JSON.parse(body) : undefined; } catch { parsed = body; }
+      try {
+        body = await response.text();
+        parsed = body ? JSON.parse(body) : undefined;
+      } catch {
+        parsed = undefined;
+      }
       if (response.ok) return parsed as T;
       if (invalidCursor(response.status, parsed)) throw new DriveCursorRescanRequiredError();
       if (!transient(response.status) || attempt === MAX_ATTEMPTS) {
