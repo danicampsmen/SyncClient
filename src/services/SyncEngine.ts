@@ -762,6 +762,11 @@ export class SyncEngine {
           const fullLocalPath = path.join(pair.localPath, canonicalRelPath);
 
           if (change) {
+            if (pair.direction === 'upload') {
+              this.logger.debug(`[FastSync] Omitiendo cambio remoto en ${canonicalRelPath} por modo 'upload'.`);
+              continue;
+            }
+
             if (change.removed) {
               this.markSelfWritten(fullLocalPath);
               await fs.rm(fullLocalPath, { recursive: true, force: true }).catch(() => { });

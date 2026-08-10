@@ -3252,33 +3252,39 @@ export class SyncEngine {
 
       // CASO A: Borrado local de carpeta que existe en Google Drive
       if (subRemoteFolder && isLocalFolderDeletion) {
-        this.logger.info(`[SyncEngine] Carpeta local '${subPrefix}' fue eliminada. Borrando en Google Drive...`);
-        try {
-          await this.deleteDriveFile(subRemoteFolder.id, remoteFolderId);
-          this.invalidatePairRootCache(pair.id);
+        if (pair.direction === 'download') {
+          this.logger.info(`[SyncEngine] Carpeta local '${subPrefix}' fue eliminada en modo 'download'. Recreando carpeta desde Drive...`);
+          this.markSelfWritten(subDir);
+          await fs.mkdir(subDir, { recursive: true }).catch(() => {});
+        } else {
+          this.logger.info(`[SyncEngine] Carpeta local '${subPrefix}' fue eliminada. Borrando en Google Drive...`);
+          try {
+            await this.deleteDriveFile(subRemoteFolder.id, remoteFolderId);
+            this.invalidatePairRootCache(pair.id);
 
-          const prefix = subPrefix + '/';
-          const folderStateMap = this.db.getFolderState(pair.id);
-          for (const [childPath, childState] of folderStateMap) {
-            if (childPath === subPrefix || childPath.startsWith(prefix)) {
-              this.db.setFileState(pair.id, childPath, {
-                ...childState,
-                is_tombstone: 1,
-                updated_at: now,
-                local_mtime: now
-              });
+            const prefix = subPrefix + '/';
+            const folderStateMap = this.db.getFolderState(pair.id);
+            for (const [childPath, childState] of folderStateMap) {
+              if (childPath === subPrefix || childPath.startsWith(prefix)) {
+                this.db.setFileState(pair.id, childPath, {
+                  ...childState,
+                  is_tombstone: 1,
+                  updated_at: now,
+                  local_mtime: now
+                });
+              }
             }
-          }
 
-          this.addEvent({
-            id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
-            filename: dirName, action: 'deleted', timestamp: Date.now(), details: 'Carpeta eliminada en Drive'
-          }, true);
-        } catch (error) {
-          this.logger.error(`[SyncEngine] Falló el borrado de la carpeta remota ${subPrefix}:`, error instanceof Error ? error.message : String(error));
-          hadFailures = true;
+            this.addEvent({
+              id: Math.random().toString(36).substr(2, 9), pairId: pair.id,
+              filename: dirName, action: 'deleted', timestamp: Date.now(), details: 'Carpeta eliminada en Drive'
+            }, true);
+          } catch (error) {
+            this.logger.error(`[SyncEngine] Falló el borrado de la carpeta remota ${subPrefix}:`, error instanceof Error ? error.message : String(error));
+            hadFailures = true;
+          }
+          continue;
         }
-        continue;
       }
 
       // CASO B: Carpeta no existe localmente ni en Drive pero sigue viva en SQLite
@@ -3299,8 +3305,12 @@ export class SyncEngine {
 
       // CASO C: Carpeta existe en Drive y se mantiene o descarga localmente
       if (subRemoteFolder) {
-        this.markSelfWritten(subDir);
         if (!existsLocally) {
+          if (pair.direction === 'upload') {
+            this.logger.debug(`[SyncEngine] Omitiendo creación de carpeta local '${subPrefix}' por estar en modo 'upload'.`);
+            continue;
+          }
+          this.markSelfWritten(subDir);
           try {
             await fs.mkdir(subDir, { recursive: true });
           } catch (error) {
@@ -3358,6 +3368,10 @@ export class SyncEngine {
             if (!childCompleted) hadFailures = true;
           }
         } else {
+          if (pair.direction === 'download') {
+            this.logger.debug(`[SyncEngine] Omitiendo creación de carpeta remota '${subPrefix}' en Drive por estar en modo 'download'.`);
+            continue;
+          }
           this.logger.info(`[SyncEngine] Creating remote folder in Google Drive for local directory ${subPrefix}...`);
           try {
             const createdFolder = await this.createDriveFolder(remoteFolderId, dirName);
