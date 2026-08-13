@@ -9,4 +9,4 @@ flock -n 9 || {
   exit 1
 }
 
-electron . --no-sandbox
+env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox

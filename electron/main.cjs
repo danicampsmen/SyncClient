@@ -2,6 +2,7 @@ const { app, BrowserWindow, Tray, Menu, MenuItem, nativeImage, session, dialog, 
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 
 // Cargar variables de .env para el proceso principal de Electron
 // (Vite solo inyecta VITE_* en el bundle del navegador, no en Node.js)
@@ -24,6 +25,42 @@ try {
 
 const firefoxUserAgent = 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0';
 
+if (process.env.NODE_ENV !== 'development') {
+  autoUpdater.autoDownload = true;
+  autoUpdater.notifyOnUpdate = true;
+  autoUpdater.logger = console;
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('[AutoUpdater] Update available:', info.version);
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('[AutoUpdater] Update not available:', info.version);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[AutoUpdater] Update downloaded:', info.version);
+    const dialogOpts = {
+      type: 'info',
+      buttons: ['Reiniciar ahora', 'Más tarde'],
+      title: 'Actualización disponible',
+      message: 'Se descargó una nueva versión de SyncClient.',
+      detail: `Versión ${info.version} lista para instalar.`
+    };
+    dialog.showMessageBox(dialogOpts).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[AutoUpdater] Error:', err);
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    console.log(`[AutoUpdater] Descargando: ${Math.round(progress.percent)}%`);
+  });
+}
+
 app.whenReady().then(() => {
   app.commandLine.appendSwitch('disable-features', 'UserAgentClientHint');
   app.commandLine.appendSwitch('user-agent', firefoxUserAgent);
@@ -32,6 +69,10 @@ app.whenReady().then(() => {
     app.commandLine.appendSwitch('disable-dev-shm-usage');
     app.commandLine.appendSwitch('disable-gpu-compositing');
     app.commandLine.appendSwitch('force-dark-mode');
+  }
+
+  if (process.env.NODE_ENV !== 'development') {
+    autoUpdater.checkForUpdatesAndNotify();
   }
 });
 
@@ -777,6 +818,10 @@ function createWindow() {
 
         mainWindow.webContents.on('did-finish-load', () => {
           console.log('[Electron] Frontend cargado correctamente.');
+          while (deepLinkQueue.length > 0) {
+            const payload = deepLinkQueue.shift();
+            mainWindow.webContents.send('deep-link', payload);
+          }
         });
         return;
       }
@@ -789,8 +834,33 @@ function createWindow() {
   loadWhenReady();
 }
 
+let deepLinkQueue = [];
+function handleDeepLink(url) {
+  if (!url || !url.startsWith('syncclient://')) return;
+  const parsed = new URL(url);
+  const host = parsed.host;
+  const path = parsed.pathname.replace(/^\/+/, '');
+  const params = Object.fromEntries(parsed.searchParams);
+  const payload = { host, path, params, raw: url };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('deep-link', payload);
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    deepLinkQueue.push(payload);
+  }
+}
+
 app.whenReady().then(async () => {
   app.commandLine.appendSwitch('disable-gpu-compositing');
+
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('syncclient', process.execPath, [path.resolve(process.argv[1])]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient('syncclient');
+  }
 
   session.defaultSession.setUserAgent(firefoxUserAgent);
 
@@ -817,6 +887,22 @@ app.whenReady().then(async () => {
       mainWindow.focus();
     }
   });
+
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+  });
+});
+
+app.on('second-instance', (_event, argv) => {
+  if (process.platform === 'win32') {
+    const url = argv.find(arg => typeof arg === 'string' && arg.startsWith('syncclient://'));
+    if (url) handleDeepLink(url);
+  }
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
 });
 
 app.on('before-quit', () => {

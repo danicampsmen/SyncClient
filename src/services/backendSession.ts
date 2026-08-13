@@ -3,7 +3,10 @@ import { Logger } from '../shared/browserLogger';
 
 const logger = new Logger('BackendSession');
 
-const BACKEND_ORIGIN = Capacitor.isNativePlatform() ? 'http://localhost:3000' : '';
+const BACKEND_ORIGIN = Capacitor.isNativePlatform()
+  ? (import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:3000')
+  : '';
+export { BACKEND_ORIGIN };
 const CLIENT_KIND = Capacitor.isNativePlatform()
   ? 'android'
   : ((window as any).electronBridge?.isElectron ? 'electron' : 'web');

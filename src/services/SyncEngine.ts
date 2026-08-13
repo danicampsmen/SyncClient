@@ -11,6 +11,9 @@ import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager } from '../shared/VectorClock';
 import { scanChanges } from '../shared/Scanner';
+import { ExifDateExtractor } from '../shared/ExifDateExtractor';
+import { SyncFilterEngine } from '../shared/SyncFilterEngine';
+import { ConditionEvaluator } from '../shared/ConditionEvaluator';
 import { NodeFileSystem } from '../utils/nodeFileSystem';
 
 // --- Imports desde src/backend/ ---
@@ -92,13 +95,30 @@ export class SyncEngine {
     autoStart: false,
     desktopNotifications: true
   };
+  private readonly exifExtractor = new ExifDateExtractor();
+  private readonly filterEngine = new SyncFilterEngine();
 
   private manifests: Record<string, Record<string, any>> = {};
   private pendingConflicts: PendingConflict[] = [];
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
-  private googleClientId: string = '';
-  private googleClientSecret: string = '';
+  private get googleClientId(): string {
+    const fbConfig = getFirebaseClientConfig();
+    return process.env.VITE_FIREBASE_OAUTH_CLIENT_ID
+      || process.env.VITE_GOOGLE_CLIENT_ID
+      || process.env.GOOGLE_CLIENT_ID
+      || (fbConfig as any).oAuthClientId
+      || '';
+  }
+
+  private get googleClientSecret(): string {
+    const fbConfig = getFirebaseClientConfig();
+    return process.env.VITE_GOOGLE_CLIENT_SECRET
+      || process.env.GOOGLE_CLIENT_SECRET
+      || process.env.VITE_FIREBASE_CLIENT_SECRET
+      || process.env.FIREBASE_CLIENT_SECRET
+      || '';
+  }
   private configDir = path.join(os.homedir(), '.config', 'syncclient');
   private configFile = path.join(this.configDir, 'sync_data.json');
 
@@ -462,17 +482,37 @@ export class SyncEngine {
   private async _refreshAccessTokenInternal(): Promise<boolean> {
     if (!this.refreshToken) return false;
     try {
-      const res = await fetch('https://oauth2.googleapis.com/token', {
+      const buildParams = (includeSecret = true) => {
+        const params = new URLSearchParams({
+          client_id: this.googleClientId || '',
+          refresh_token: this.refreshToken!,
+          grant_type: 'refresh_token',
+        });
+        if (includeSecret && this.googleClientSecret) {
+          params.append('client_secret', this.googleClientSecret);
+        }
+        return params;
+      };
+
+      let res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: this.googleClientId,
-          client_secret: this.googleClientSecret,
-          refresh_token: this.refreshToken,
-          grant_type: 'refresh_token',
-        }).toString(),
+        body: buildParams(true).toString(),
         signal: AbortSignal.timeout(15000),
       });
+
+      if (!res.ok && this.googleClientSecret) {
+        const clone = res.clone();
+        const errData = await clone.json().catch(() => ({}));
+        if (errData.error === 'invalid_client') {
+          res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: buildParams(false).toString(),
+            signal: AbortSignal.timeout(15000),
+          });
+        }
+      }
 
       if (!res.ok) {
         if (res.status === 400 || res.status === 401) {
@@ -854,8 +894,45 @@ export class SyncEngine {
 
   // ─── v2: SyncDirectoryTree con Correcciones Completas ───────────
 
-  private async v2SyncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = ''): Promise<boolean> {
+  private async v2SyncDirectoryTree(
+    localDir: string,
+    remoteFolderId: string,
+    pair: SyncPair,
+    relativePrefix = '',
+    dbFolderMap?: Map<string, Map<string, FileState>>,
+    scanTracker?: { scannedFolders: number; totalFoldersEstimate: number }
+  ): Promise<boolean> {
     if (!this.db || !this.DEVICE_ID) return false;
+
+    let folderMap = dbFolderMap;
+    let tracker = scanTracker;
+    if (!folderMap) {
+      folderMap = new Map<string, Map<string, FileState>>();
+      const dbState = this.db.getFolderState(pair.id);
+      for (const [relPath, state] of dbState) {
+        const canonicalRelPath = normalizeNFC(relPath);
+        const dirname = path.dirname(canonicalRelPath) === '.' ? '' : normalizeNFC(path.dirname(canonicalRelPath).replace(/\\/g, '/'));
+        const baseName = normalizeNFC(path.basename(canonicalRelPath));
+        let subMap = folderMap.get(dirname);
+        if (!subMap) {
+          subMap = new Map<string, FileState>();
+          folderMap.set(dirname, subMap);
+        }
+        subMap.set(baseName, state);
+      }
+    }
+
+    if (!tracker) {
+      tracker = { scannedFolders: 0, totalFoldersEstimate: Math.max(1, folderMap.size) };
+    }
+
+    tracker.scannedFolders++;
+    const scanPct = Math.min(99, Math.max(1, Math.round((tracker.scannedFolders / tracker.totalFoldersEstimate) * 100)));
+    if (pair.progress) {
+      pair.progress.currentFile = relativePrefix ? `Escaneando subcarpeta: ${relativePrefix}` : 'Escaneando árbol de directorios...';
+      pair.progress.percentage = scanPct;
+      pair.progress.action = 'comprobando';
+    }
 
     const checkInterrupt = () => {
       if (this.interruptRequested[pair.id]) {
@@ -863,18 +940,10 @@ export class SyncEngine {
       }
     };
 
-    const dbState = this.db.getFolderState(pair.id);
-    const dirDbState = new Map<string, FileState>();
     const normalizedPrefix = normalizeNFC(relativePrefix.replace(/\\/g, '/'));
+    const dirDbState = folderMap.get(normalizedPrefix) || new Map<string, FileState>();
 
-    for (const [relPath, state] of dbState) {
-      const dirname = path.dirname(relPath) === '.' ? '' : normalizeNFC(path.dirname(relPath).replace(/\\/g, '/'));
-      if (dirname === normalizedPrefix) {
-        dirDbState.set(normalizeNFC(path.basename(relPath)), state);
-      }
-    }
-
-    const scanResult = await scanChanges(localDir, dirDbState, new NodeFileSystem(), pair.id);
+    const scanResult = await scanChanges(localDir, dirDbState, new NodeFileSystem(), pair.id, this.exifExtractor as any);
     if (scanResult === 'PERMISSION_DENIED') {
       pair.status = 'error';
       return false;
@@ -1187,7 +1256,7 @@ export class SyncEngine {
         const subRemoteFolder = subDirs.find(d => normalizeNFC(d.name) === normalizeNFC(dir.name));
 
         if (subRemoteFolder) {
-          await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix);
+          await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix, folderMap, tracker);
         }
       }
     }
@@ -1196,6 +1265,17 @@ export class SyncEngine {
   }
 
   // ─── Métodos Auxiliares e Infraestructura de Red ───────────────
+
+  private async writeSidecarMeta(localFilePath: string, remoteId: string, remoteMtime: number, md5Hash?: string | null) {
+    try {
+      const metaPath = `${localFilePath}.syncmeta`;
+      const metaData = JSON.stringify({ remoteId, remoteMtime, md5Hash, updatedAt: Date.now() });
+      this.markSelfWritten(metaPath);
+      await fs.writeFile(metaPath, metaData, 'utf-8');
+    } catch (err) {
+      this.logger.debug('[SyncEngine/Sidecar] Falló la escritura de .syncmeta:', err);
+    }
+  }
 
   private async downloadDriveBinary(fileId: string, destPath: string, modifiedTime: string, pairId: string, expectedMd5?: string): Promise<void> {
     await downloadToAtomicFile({
@@ -1206,6 +1286,7 @@ export class SyncEngine {
       client: this.transferClient(pairId),
       markSelfWritten: filePath => this.markSelfWritten(filePath),
     });
+    await this.writeSidecarMeta(destPath, fileId, new Date(modifiedTime).getTime(), expectedMd5);
   }
 
   private async deleteDriveFile(fileId: string, parentId?: string): Promise<void> {
@@ -1306,15 +1387,7 @@ export class SyncEngine {
   }
 
   private initializeOAuthCredentials() {
-    const fbConfig = getFirebaseClientConfig();
-    this.googleClientId = process.env.VITE_FIREBASE_OAUTH_CLIENT_ID
-      || process.env.VITE_GOOGLE_CLIENT_ID
-      || process.env.GOOGLE_CLIENT_ID
-      || (fbConfig as any).oAuthClientId
-      || '';
-    this.googleClientSecret = process.env.VITE_GOOGLE_CLIENT_SECRET
-      || process.env.GOOGLE_CLIENT_SECRET
-      || '';
+    // Dynamically evaluated via getters
   }
 
   public async shutdown(): Promise<void> {
@@ -1353,8 +1426,7 @@ export class SyncEngine {
   private async handleDriveResponse(res: Response): Promise<Response> {
     if (!res.ok) {
       if (res.status === 401) {
-        const refreshed = await this.refreshAccessToken();
-        if (refreshed) throw new Error('TOKEN_REFRESHED_RETRY');
+        await this.refreshAccessToken().catch(() => false);
         this.accessToken = null;
         throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
       }

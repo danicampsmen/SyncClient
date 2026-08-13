@@ -4,4 +4,8 @@
     <string name="title_activity_main">SyncClient</string>
     <string name="package_name">com.syncclient.app</string>
     <string name="custom_url_scheme">com.syncclient.app</string>
+    <string name="shortcut_sync_short">Sync Now</string>
+    <string name="shortcut_sync_long">Start sync now</string>
+    <string name="shortcut_pause_short">Pause</string>
+    <string name="shortcut_pause_long">Pause sync</string>
 </resources>

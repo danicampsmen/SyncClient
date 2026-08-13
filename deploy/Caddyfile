@@ -1,0 +1,15 @@
+sync.tudominio.com {
+    # Proxy reverso al backend Node.js
+    reverse_proxy http://127.0.0.1:3000
+
+    # Aumentar límite de body para uploads grandes
+    request_body_max_size 5G
+
+    # Headers útiles
+    header {
+        # HSTS opcional
+        # Strict-Transport-Security max-age=31536000
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+}

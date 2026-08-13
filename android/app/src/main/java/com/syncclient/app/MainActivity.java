@@ -1,7 +1,13 @@
 package com.syncclient.app;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
+import android.widget.Toast;
 import com.getcapacitor.BridgeActivity;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -12,16 +18,75 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends BridgeActivity {
-    private static final String TAG = "LocalOAuthServer";
+    private static final String TAG = "SyncClient";
+    private static final String ACTION_TASKER_SYNC = "com.syncclient.app.TASKER_SYNC";
     private volatile boolean isRunning = false;
     private ServerSocket serverSocket;
     private volatile String latestOAuthToken = null;
+    private BroadcastReceiver taskerReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(StreamedFilesystem.class);
         super.onCreate(savedInstanceState);
         startLocalServer();
+        handleIntent(getIntent());
+        registerTaskerReceiver();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleIntent(intent);
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(action)) {
+            Uri data = intent.getData();
+            if (data != null && "syncclient".equals(data.getScheme())) {
+                String host = data.getHost();
+                if ("sync".equals(host)) {
+                    String pairId = data.getLastPathSegment();
+                    Log.i(TAG, "Deep link sync received for pair: " + pairId);
+                    Toast.makeText(this, "Sync triggered for: " + pairId, Toast.LENGTH_SHORT).show();
+                } else if ("oauth".equals(host)) {
+                    Log.i(TAG, "OAuth deep link received");
+                }
+            }
+        }
+    }
+
+    private void registerTaskerReceiver() {
+        taskerReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent != null && ACTION_TASKER_SYNC.equals(intent.getAction())) {
+                    Log.i(TAG, "Tasker sync broadcast received");
+                    Toast.makeText(context, "Tasker sync triggered", Toast.LENGTH_SHORT).show();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(ACTION_TASKER_SYNC);
+        registerReceiver(taskerReceiver, filter);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        isRunning = false;
+        if (taskerReceiver != null) {
+            unregisterReceiver(taskerReceiver);
+            taskerReceiver = null;
+        }
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (Exception e) {
+            // ignore
+        }
     }
 
     private void startLocalServer() {
@@ -29,8 +94,8 @@ public class MainActivity extends BridgeActivity {
         isRunning = true;
         new Thread(() -> {
             try {
-                serverSocket = new ServerSocket(3000, 10, InetAddress.getByName("127.0.0.1"));
-                Log.i(TAG, "Servidor autónomo de OAuth escuchando en 127.0.0.1:3000 (Sin necesidad de PC)");
+                serverSocket = new ServerSocket(3005, 10, InetAddress.getByName("127.0.0.1"));
+                Log.i(TAG, "Servidor autónomo de OAuth escuchando en 127.0.0.1:3005 (Sin necesidad de PC)");
                 while (isRunning && !serverSocket.isClosed()) {
                     try {
                         Socket socket = serverSocket.accept();
@@ -40,7 +105,7 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
             } catch (Exception e) {
-                Log.i(TAG, "El puerto 3000 ya se encuentra en uso o enlazado por túnel ADB: " + e.getMessage());
+                Log.i(TAG, "El puerto 3005 ya se encuentra en uso: " + e.getMessage());
             }
         }).start();
     }
@@ -73,7 +138,7 @@ public class MainActivity extends BridgeActivity {
                         + "const params = new URLSearchParams(hash);"
                         + "const token = params.get('access_token') || params.get('token');"
                         + "if (token) {"
-                        + "  fetch('http://localhost:3000/api/oauth/token', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });"
+                        + "  fetch('http://127.0.0.1:3005/api/oauth/token', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({token}) });"
                         + "  document.getElementById('icon').textContent = '✅';"
                         + "  document.getElementById('title').textContent = '¡Conexión Exitosa!';"
                         + "  document.getElementById('msg').textContent = 'Sesión iniciada sin necesidad de PC. Volviendo a la app SyncClient...';"
@@ -140,6 +205,10 @@ public class MainActivity extends BridgeActivity {
     public void onDestroy() {
         super.onDestroy();
         isRunning = false;
+        if (taskerReceiver != null) {
+            unregisterReceiver(taskerReceiver);
+            taskerReceiver = null;
+        }
         try {
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();

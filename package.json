@@ -13,17 +13,18 @@
     "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --outfile=dist/cli.js && chmod +x dist/cli.js",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs && npm run build:cli",
     "start": "npm run build && bash scripts/start-electron.sh",
-    "tray": "npm run build && electron . --no-sandbox --hidden",
-    "electron:dev": "kill-port 3000 && npm run build && concurrently \"npm run dev\" \"wait-on tcp:3000 && electron . --no-sandbox\"",
-    "electron:build": "npm run build && electron-builder",
+    "tray": "npm run build && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox --hidden",
+    "electron:dev": "kill-port 3000 && npm run build && concurrently \"npm run dev\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox\"",
+    "electron:build": "npm run build && env -u ELECTRON_RUN_AS_NODE electron-builder",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "verify": "bash scripts/verify.sh",
     "auth:logout": "bash scripts/logout.sh",
-    "android:build": "npm run build && npx cap copy android",
-    "android:open": "npm run android:build && cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew installDebug && cd .. && adb reverse tcp:3000 tcp:3000 && adb shell monkey -p com.syncclient.app -c android.intent.category.LAUNCHER 1"
+    "android:build": "npm run build && npx cap sync android",
+    "android:open": "npm run android:build && cd android && JAVA_HOME=/opt/android-studio/jbr ./gradlew installDebug && cd .. && adb reverse tcp:3000 tcp:3000 && adb shell monkey -p com.syncclient.app -c android.intent.category.LAUNCHER 1",
+    "start:prod": "NODE_ENV=production node dist/server.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
@@ -32,10 +33,14 @@
     "@capacitor/core": "^8.4.2",
     "@capacitor/filesystem": "^8.1.2",
     "@parcel/watcher": "^2.6.0",
+    "@sentry/capacitor": "^4.3.0",
+    "@sentry/electron": "^7.16.0",
+    "@sentry/node": "^10.70.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^13.0.2",
     "capacitor-secure-storage-plugin": "^0.13.0",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "firebase": "^12.17.0",
     "lucide-react": "^0.546.0",
@@ -52,7 +57,7 @@
     "@types/node": "^22.14.0",
     "@types/sql.js": "^1.4.11",
     "concurrently": "^10.0.4",
-    "electron": "^43.2.0",
+    "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "kill-port": "^2.0.1",
@@ -77,6 +82,23 @@
       ],
       "category": "Utility",
       "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "syncclient",
+      "repo": "syncclient"
     },
     "files": [
       "dist/**/*",

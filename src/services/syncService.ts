@@ -251,7 +251,7 @@ class SyncService {
     }
   }
 
-  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename') {
+  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename' | 'overwrite_oldest' | 'overwrite_newest' | 'use_left' | 'use_right' | 'delete' | 'consider_equal') {
     if (this.isNative) {
       await this.ensureNativeEngine();
       // Fix #5: Implementar resolución de conflictos en nativo
@@ -303,7 +303,6 @@ class SyncService {
   public async hydrate(pairId: string) {
     if (this.isNative) {
       await this.ensureNativeEngine();
-      // Fix #5: Delegar al backend del PC para hidratar (descargar offline)
       logger.info('Delegando hydrate al PC...');
       return await backendFetch('/api/sync/hydrate', {
         method: 'POST',
@@ -320,6 +319,183 @@ class SyncService {
         body: JSON.stringify({ pairId })
       });
     }
+  }
+
+  public async getPairFilters(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getPairFilters?.(pairId) || [];
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/filters`);
+    if (!res.ok) throw new Error('Failed to fetch filters');
+    const data = await res.json();
+    return data.filters || [];
+  }
+
+  public async addPairFilter(pairId: string, filter: any) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.addPairFilter?.(pairId, filter);
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/filters`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(filter)
+    });
+    if (!res.ok) throw new Error('Failed to add filter');
+    return await res.json();
+  }
+
+  public async deletePairFilter(filterId: number) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.deletePairFilter?.(filterId);
+    }
+    const res = await backendFetch(`/api/filters/${encodeURIComponent(filterId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete filter');
+    return await res.json();
+  }
+
+  public async getPairConditions(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getPairConditions?.(pairId) || null;
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/conditions`);
+    if (!res.ok) throw new Error('Failed to fetch conditions');
+    const data = await res.json();
+    return data.conditions || null;
+  }
+
+  public async setPairConditions(pairId: string, conditions: any) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.setPairConditions?.({ pair_id: pairId, ...conditions });
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/conditions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairId, ...conditions })
+    });
+    if (!res.ok) throw new Error('Failed to update conditions');
+    const data = await res.json();
+    return data.conditions;
+  }
+
+  public async getWebhooks(pairId?: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getWebhooks?.(pairId) || [];
+    }
+    const url = pairId ? `/api/webhooks?pairId=${encodeURIComponent(pairId)}` : '/api/webhooks';
+    const res = await backendFetch(url);
+    if (!res.ok) throw new Error('Failed to fetch webhooks');
+    const data = await res.json();
+    return data.webhooks || [];
+  }
+
+  public async addWebhook(pairId: string, targetUrl: string, eventTrigger: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.addWebhook?.({ pair_id: pairId, target_url: targetUrl, event_trigger: eventTrigger || 'all' });
+    }
+    const res = await backendFetch('/api/webhooks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairId, targetUrl, eventTrigger: eventTrigger || 'all' })
+    });
+    if (!res.ok) throw new Error('Failed to add webhook');
+    return await res.json();
+  }
+
+  public async deleteWebhook(id: number) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.deleteWebhook?.(id);
+    }
+    const res = await backendFetch(`/api/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete webhook');
+    return await res.json();
+  }
+
+  public async getPairSchedules(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getPairSchedules?.(pairId) || [];
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/schedules`);
+    if (!res.ok) throw new Error('Failed to fetch schedules');
+    const data = await res.json();
+    return data.schedules || [];
+  }
+
+  public async addPairSchedule(pairId: string, schedule: any) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.addPairSchedule?.(pairId, schedule);
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedule)
+    });
+    if (!res.ok) throw new Error('Failed to add schedule');
+    return await res.json();
+  }
+
+  public async updatePairSchedule(pairId: string, schedule: any) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.updatePairSchedule?.({ ...schedule, pair_id: pairId });
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/schedules/${encodeURIComponent(schedule.id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedule)
+    });
+    if (!res.ok) throw new Error('Failed to update schedule');
+    const data = await res.json();
+    return data.schedule;
+  }
+
+  public async deletePairSchedule(scheduleId: number) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.deletePairSchedule?.(scheduleId);
+    }
+    const res = await backendFetch(`/api/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete schedule');
+    return await res.json();
+  }
+
+  public async getRecycleBin(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getRecycleBin?.(pairId) || { entries: [], totalSize: 0, formattedSize: '0 B' };
+    }
+    const res = await backendFetch(`/api/recycle-bin/${encodeURIComponent(pairId)}`);
+    if (!res.ok) throw new Error('Failed to fetch recycle bin');
+    return await res.json();
+  }
+
+  public async emptyRecycleBin(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.emptyRecycleBin?.(pairId) || { success: true, deletedCount: 0 };
+    }
+    const res = await backendFetch(`/api/recycle-bin/${encodeURIComponent(pairId)}/empty`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to empty recycle bin');
+    return await res.json();
+  }
+
+  public async rotateRecycleBin(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.rotateRecycleBin?.(pairId) || { success: true, entries: [], totalSize: 0, formattedSize: '0 B' };
+    }
+    const res = await backendFetch(`/api/recycle-bin/${encodeURIComponent(pairId)}/rotate`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to rotate recycle bin');
+    return await res.json();
   }
 }
 

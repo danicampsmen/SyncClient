@@ -8,7 +8,7 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import { getFirebaseClientConfig } from './config/firebaseConfig';
-import { backendFetch, ensureBackendSession } from './services/backendSession';
+import { backendFetch, ensureBackendSession, BACKEND_ORIGIN } from './services/backendSession';
 import { SecureStore } from './utils/secureStore';
 import { Logger } from './shared/browserLogger';
 
@@ -282,7 +282,7 @@ const pollBackendForToken = (): Promise<string | null> =>
           clearInterval(interval);
           const verifier = getPKCEVerifier(data.state);
           if (verifier) {
-            const tokens = await exchangeCodeForTokens(data.code, verifier, 'http://127.0.0.1:3000/api/oauth/callback');
+            const tokens = await exchangeCodeForTokens(data.code, verifier, `${BACKEND_ORIGIN}/api/oauth/callback`);
             if (tokens) {
               if (tokens.refreshToken) {
                 cachedRefreshToken = tokens.refreshToken;
@@ -439,7 +439,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string;
             Browser.close().catch(() => { });
             const verifier = getPKCEVerifier(state);
             if (verifier) {
-              const tokens = await exchangeCodeForTokens(code, verifier, 'http://127.0.0.1:3000/api/oauth/callback');
+               const tokens = await exchangeCodeForTokens(code, verifier, `${BACKEND_ORIGIN}/api/oauth/callback`);
               if (tokens?.refreshToken) {
                 cachedRefreshToken = tokens.refreshToken;
                 await SecureStore.set('gdrive_refresh_token', tokens.refreshToken);

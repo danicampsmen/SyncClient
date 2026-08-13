@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import os from "os";
@@ -15,7 +16,10 @@ try {
       const match = line.match(/^([^#=\s][^=]*)=(.*)$/);
       if (match) {
         const key = match[1].trim();
-        const value = match[2].trim();
+        let value = match[2].trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
         if (!process.env[key]) process.env[key] = value;
       }
     }
@@ -39,9 +43,21 @@ try {
 import { syncEngine } from "./src/backend/syncEngine";
 import { Logger } from "./src/backend/logger";
 import { CoreSyncLogic } from "./src/shared/CoreSyncLogic";
+import { autoStartManager } from "./src/backend/autoStart";
+import { startCliServer } from "./src/backend/cliServer";
+import { initBackendTelemetry } from "./src/backend/telemetry";
+import { RecycleBinManager } from "./src/backend/recycleBin";
 
 const CONFIG_DIR = path.join(os.homedir(), ".config", "syncclient");
 const LOG_DIR = path.join(CONFIG_DIR, "logs");
+
+initBackendTelemetry();
+
+const recycleBin = new RecycleBinManager(new Logger('RecycleBin'));
+
+if (process.argv.includes('--cli')) {
+  startCliServer(3001);
+}
 
 
 // --- Utilidades de validación de entrada (Fix 11) ---
@@ -167,6 +183,8 @@ async function startServer() {
   Logger.initialize(LOG_DIR);
 
   const app = express();
+  app.set('trust proxy', 1);
+  const HOST = process.env.HOST || '127.0.0.1';
   const PORT = 3000;
 
   app.use(express.json({ limit: '50mb' }));
@@ -175,16 +193,29 @@ async function startServer() {
   // Se permite localhost (Electron, Capacitor via ADB reverse) y el origen configurado vía env
   const allowedOrigins = new Set([
     'http://localhost:3000',
+    'https://localhost:3000',
     'http://127.0.0.1:3000',
+    'https://127.0.0.1:3000',
     'http://localhost',
+    'https://localhost',
     'capacitor://localhost',
     'ionic://localhost',
     process.env.CORS_ORIGIN || '',
   ].filter(Boolean));
 
+  const isAllowedOrigin = (origin: string): boolean => {
+    if (!origin) return false;
+    if (allowedOrigins.has(origin)) return true;
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
+    } catch {}
+    return false;
+  };
+
   app.use((req, res, next) => {
     const origin = req.get('Origin') || '';
-    if (allowedOrigins.has(origin)) {
+    if (isAllowedOrigin(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
@@ -278,7 +309,7 @@ async function startServer() {
     }
     const origin = req.get('Origin');
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) &&
-      origin && !allowedOrigins.has(origin)) {
+      origin && !isAllowedOrigin(origin)) {
       return res.status(403).json({ error: 'Origen no permitido' });
     }
     session.lastSeenAt = Date.now();
@@ -479,6 +510,29 @@ async function startServer() {
       }
       await syncEngine.updateSettings(settings);
       res.json({ success: true, status: syncEngine.getStatus() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/settings/autostart", async (req, res) => {
+    try {
+      const { enabled } = req.body;
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: "enabled debe ser booleano" });
+      }
+      await autoStartManager.setEnabled(enabled);
+      const current = await autoStartManager.isEnabled();
+      res.json({ success: true, autoStart: current });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/autostart", async (req, res) => {
+    try {
+      const current = await autoStartManager.isEnabled();
+      res.json({ autoStart: current });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -906,6 +960,250 @@ async function startServer() {
     }
   });
 
+  // --- Endpoints para Capacidades Estilo FolderSync ---
+
+  // 1. Filtros por Pareja
+  app.get("/api/pairs/:pairId/filters", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const filters = syncEngine.getPairFilters(pairId);
+      res.json({ filters });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pairs/:pairId/filters", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const { ruleType, stringValue, numericValue, numericValue2, isInclude } = req.body;
+      if (!isValidString(ruleType, 100)) {
+        return res.status(400).json({ error: "ruleType es requerido" });
+      }
+      const filter = syncEngine.addPairFilter(pairId, {
+        pair_id: pairId,
+        rule_type: ruleType,
+        string_value: stringValue || null,
+        numeric_value: typeof numericValue === 'number' ? numericValue : null,
+        numeric_value2: typeof numericValue2 === 'number' ? numericValue2 : null,
+        is_include: isInclude ? 1 : 0,
+        created_at: Date.now(),
+      });
+      res.json({ success: true, filter });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/filters/:id", (req, res) => {
+    try {
+      const filterId = parseInt(req.params.id, 10);
+      if (isNaN(filterId)) return res.status(400).json({ error: "ID inválido" });
+      syncEngine.deletePairFilter(filterId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Log de Auditoría por Archivo Individual
+  app.get("/api/pairs/:pairId/logs/items", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const limit = parseInt(req.query.limit as string || '50', 10);
+      const offset = parseInt(req.query.offset as string || '0', 10);
+      const logs = syncEngine.getItemLogs(pairId, limit, offset);
+      res.json({ logs });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. Condiciones de Entorno (Batería, Wi-Fi)
+  app.get("/api/pairs/:pairId/conditions", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const conditions = syncEngine.getPairConditions(pairId);
+      res.json({ conditions });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/pairs/:pairId/conditions", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const { requireCharging, requireWifi, minBatteryLevel, allowedSsids, blockOnRoaming, blockOnMetered, requireVpn } = req.body;
+      const conditions = syncEngine.setPairConditions({
+        pair_id: pairId,
+        require_charging: requireCharging ? 1 : 0,
+        require_wifi: requireWifi ? 1 : 0,
+        min_battery_level: typeof minBatteryLevel === 'number' ? minBatteryLevel : 0,
+        allowed_ssids: allowedSsids || null,
+        block_on_roaming: blockOnRoaming ? 1 : 0,
+        block_on_metered: blockOnMetered ? 1 : 0,
+        require_vpn: requireVpn ? 1 : 0,
+      });
+      res.json({ success: true, conditions });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Webhooks HTTP
+  app.get("/api/webhooks", (req, res) => {
+    try {
+      const pairId = req.query.pairId as string;
+      const webhooks = syncEngine.getWebhooks(pairId);
+      res.json({ webhooks });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/webhooks", (req, res) => {
+    try {
+      const { pairId, targetUrl, eventTrigger } = req.body;
+      if (!isValidString(pairId, 256) || !isValidString(targetUrl, 2048)) {
+        return res.status(400).json({ error: "pairId y targetUrl son requeridos" });
+      }
+      const webhook = syncEngine.addWebhook({
+        pair_id: pairId,
+        target_url: targetUrl,
+        event_trigger: eventTrigger || 'all',
+        is_active: 1,
+        created_at: Date.now(),
+      });
+      res.json({ success: true, webhook });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/webhooks/:id", (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido" });
+      syncEngine.deleteWebhook(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Schedules por Pareja
+  app.get("/api/pairs/:pairId/schedules", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const schedules = syncEngine.getPairSchedules(pairId);
+      res.json({ schedules });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pairs/:pairId/schedules", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const { name, interval_minutes, enabled, require_charging, require_wifi, min_battery_level, block_on_roaming, block_on_metered, require_vpn, allowed_ssids } = req.body;
+      if (!isValidString(name, 120)) {
+        return res.status(400).json({ error: "name es requerido" });
+      }
+      const schedule = syncEngine.addPairSchedule(pairId, {
+        name: name || 'Schedule',
+        interval_minutes: typeof interval_minutes === 'number' ? interval_minutes : 60,
+        enabled: enabled ? 1 : 0,
+        require_charging: require_charging ? 1 : 0,
+        require_wifi: require_wifi ? 1 : 0,
+        min_battery_level: typeof min_battery_level === 'number' ? min_battery_level : 0,
+        block_on_roaming: block_on_roaming ? 1 : 0,
+        block_on_metered: block_on_metered ? 1 : 0,
+        require_vpn: require_vpn ? 1 : 0,
+        allowed_ssids: allowed_ssids || null,
+        created_at: Date.now(),
+      });
+      res.json({ success: true, schedule });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/pairs/:pairId/schedules/:scheduleId", (req, res) => {
+    try {
+      const { scheduleId } = req.params;
+      const { name, interval_minutes, enabled, require_charging, require_wifi, min_battery_level, block_on_roaming, block_on_metered, require_vpn, allowed_ssids } = req.body;
+      const schedule = {
+        id: parseInt(scheduleId, 10),
+        pair_id: req.params.pairId,
+        name: name || 'Schedule',
+        interval_minutes: typeof interval_minutes === 'number' ? interval_minutes : 60,
+        enabled: enabled ? 1 : 0,
+        require_charging: require_charging ? 1 : 0,
+        require_wifi: require_wifi ? 1 : 0,
+        min_battery_level: typeof min_battery_level === 'number' ? min_battery_level : 0,
+        block_on_roaming: block_on_roaming ? 1 : 0,
+        block_on_metered: block_on_metered ? 1 : 0,
+        require_vpn: require_vpn ? 1 : 0,
+        allowed_ssids: allowed_ssids || null,
+      };
+      syncEngine.updatePairSchedule(schedule);
+      res.json({ success: true, schedule });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/schedules/:id", (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido" });
+      syncEngine.deletePairSchedule(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. Recycle Bin
+  app.get("/api/recycle-bin/:pairId", async (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const pair = syncEngine.getPairs().find(p => p.id === pairId);
+      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
+      const entries = await recycleBin.scanPair(pair.localPath, pairId);
+      const totalSize = await recycleBin.getTotalSize(entries);
+      res.json({ entries, totalSize, formattedSize: recycleBin.formatBytes(totalSize) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/recycle-bin/:pairId/empty", async (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const pair = syncEngine.getPairs().find(p => p.id === pairId);
+      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
+      const count = await recycleBin.empty(pair.localPath);
+      res.json({ success: true, deletedCount: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/recycle-bin/:pairId/rotate", async (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const pair = syncEngine.getPairs().find(p => p.id === pairId);
+      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
+      const entries = await recycleBin.scanPair(pair.localPath, pairId);
+      const rotated = await recycleBin.rotate(entries);
+      const totalSize = await recycleBin.getTotalSize(rotated);
+      res.json({ success: true, entries: rotated, totalSize, formattedSize: recycleBin.formatBytes(totalSize) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Detectar modo producción de forma segura tanto en ESM (tsx) como en CJS (dist/server.cjs o app.asar)
   const isCjs = typeof __filename !== 'undefined';
   const isProduction = process.env.NODE_ENV === "production" || (isCjs && (__filename.endsWith(".cjs") || __dirname.includes("dist") || __dirname.includes("app.asar")));
@@ -925,8 +1223,8 @@ async function startServer() {
     });
   }
 
-  const httpServer = app.listen(PORT, "127.0.0.1", () => {
-    console.log(`[Info] Servidor backend activo en http://127.0.0.1:${PORT}`);
+  const httpServer = app.listen(PORT, HOST, () => {
+    console.log(`[Info] Servidor backend activo en http://${HOST}:${PORT}`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.log(`[Info] El servidor backend ya está activo en el puerto ${PORT}`);

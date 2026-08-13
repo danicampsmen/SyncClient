@@ -19,5 +19,9 @@ contextBridge.exposeInMainWorld('electronBridge', {
   onTrayAction: (callback) => {
     ipcRenderer.removeAllListeners('tray-action');
     ipcRenderer.on('tray-action', (_event, action) => callback(action));
+  },
+  onDeepLink: (callback) => {
+    ipcRenderer.removeAllListeners('deep-link');
+    ipcRenderer.on('deep-link', (_event, payload) => callback(payload));
   }
 });

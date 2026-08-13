@@ -109,7 +109,8 @@ export async function scanChanges(
     dir: string,
     dbState: ReadonlyMap<string, FileState>,
     fs: IFileSystem,
-    pairId: string
+    pairId: string,
+    exifExtractor?: { extract(filePath: string, fallbackMtime?: number | null): Promise<{ date: Date | null; source: string }> }
 ): Promise<ScanResult | 'PERMISSION_DENIED'> {
     // Recopilar entradas del filesystem de forma compatible con Node.js y Capacitor
     interface ScanEntry {
@@ -180,7 +181,15 @@ export async function scanChanges(
         }
 
         // Quick check: mtime y size
-        const mtimeChanged = isMtimeChanged(localEntry.mtime, dbEntry.local_mtime || 0);
+        let effectiveMtime = localEntry.mtime;
+        if (exifExtractor && isImageFile(localEntry.name)) {
+          const exifResult = await exifExtractor.extract(localEntry.fullPath, localEntry.mtime);
+          if (exifResult.source === 'exif' && exifResult.date) {
+            effectiveMtime = exifResult.date.getTime();
+          }
+        }
+
+        const mtimeChanged = isMtimeChanged(effectiveMtime, dbEntry.local_mtime || 0);
         const sizeChanged = dbEntry.file_size !== null && localEntry.size !== dbEntry.file_size;
 
         if (!mtimeChanged && !sizeChanged) {
@@ -189,7 +198,7 @@ export async function scanChanges(
         }
 
         // Potencialmente modificado — marcar para block hashing (lazy)
-        changed.set(normName, localEntry);
+        changed.set(normName, { ...localEntry, mtime: effectiveMtime });
     }
 
     // Calcular hashes de bloques para archivos potencialmente modificados
@@ -275,4 +284,9 @@ async function runWithConcurrency<T>(
         throw firstError instanceof Error ? firstError : new Error(String(firstError));
     }
     return results.filter((value): value is T => value !== undefined);
+}
+
+function isImageFile(name: string): boolean {
+  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() : '';
+  return ['jpg', 'jpeg', 'png', 'heic', 'heif', 'raw', 'tiff', 'webp'].includes(ext || '');
 }

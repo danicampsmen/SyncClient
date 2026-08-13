@@ -4,14 +4,18 @@ import { Dirent } from 'fs';
 import path from 'path';
 import os from 'os';
 import { Readable } from 'stream';
+import crypto from 'node:crypto';
 import parcelWatcher, { AsyncSubscription } from '@parcel/watcher';
-import { SyncPair, SyncEvent, SyncSettings, PendingConflict, ExternalDriveAlert } from '../types';
+import { SyncPair, SyncEvent, SyncSettings, PendingConflict, ExternalDriveAlert, SyncStatus } from '../types';
 import { CoreSyncLogic, RemoteEntry, SyncStateSnapshot, DEFAULT_REMOTE_PATH } from '../shared/CoreSyncLogic';
 import { USE_V2_SYNC, FileState, DriveCursor } from '../shared/schema';
 import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager } from '../shared/VectorClock';
-import { scanChanges, computeBlockHashes } from '../shared/Scanner';
+import { scanChanges, computeBlockHashes, lazyHashBatch, type LocalEntry } from '../shared/Scanner';
+import { ExifDateExtractor } from '../shared/ExifDateExtractor';
+import { SyncFilterEngine } from '../shared/SyncFilterEngine';
+import { ConditionEvaluator } from '../shared/ConditionEvaluator';
 import { NodeFileSystem } from '../utils/nodeFileSystem';
 import { downloadToAtomicFile, requestTransfer, RESUMABLE_UPLOAD_THRESHOLD, uploadResumableFile, type TransferHttpClient, FileNotFoundError, TransferHttpError } from './transfer';
 import { acquirePairLock, PairAlreadyRunningError, type PairLock } from './pairProcessLock';
@@ -20,6 +24,7 @@ import { RcloneRunner } from './rcloneRunner';
 import { RclonePairConfig } from '../shared/rcloneConfig';
 import { SecureStore } from '../utils/secureStore';
 import { Logger } from './logger';
+import { encryptFile, decryptFile, encryptedSize, EncryptionError, deriveKey } from './encryption';
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getDatabase, ref, onValue } from 'firebase/database';
 import { getFirebaseClientConfig } from '../config/firebaseConfig';
@@ -90,12 +95,31 @@ export class SyncEngine {
     autoStart: false,
     desktopNotifications: true
   };
+  private readonly exifExtractor = new ExifDateExtractor();
+  private readonly filterEngine = new SyncFilterEngine();
   private manifests: Record<string, Record<string, ManifestEntry>> = {};
   private pendingConflicts: PendingConflict[] = [];
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
-  private googleClientId: string = '';
-  private googleClientSecret: string = '';
+  private lastTokenRefreshedAt: number = 0;
+  private lastProgressEmitAt: Record<string, number> = {};
+  private get googleClientId(): string {
+    const fbConfig = getFirebaseClientConfig();
+    return process.env.VITE_FIREBASE_OAUTH_CLIENT_ID
+      || process.env.VITE_GOOGLE_CLIENT_ID
+      || process.env.GOOGLE_CLIENT_ID
+      || (fbConfig as any).oAuthClientId
+      || '';
+  }
+
+  private get googleClientSecret(): string {
+    const fbConfig = getFirebaseClientConfig();
+    return process.env.VITE_GOOGLE_CLIENT_SECRET
+      || process.env.GOOGLE_CLIENT_SECRET
+      || process.env.VITE_FIREBASE_CLIENT_SECRET
+      || process.env.FIREBASE_CLIENT_SECRET
+      || '';
+  }
   private configDir = path.join(os.homedir(), '.config', 'syncclient');
   private configFile = path.join(this.configDir, 'sync_data.json');
 
@@ -148,6 +172,34 @@ export class SyncEngine {
   private webhookDebounceTimers: Record<string, NodeJS.Timeout> = {};
   private lastLocalMutationTime: Record<string, number> = {};
   private excludedCleanCancelled = false;
+  private scheduleInterval: NodeJS.Timeout | null = null;
+
+  private async readSystemStatus() {
+    try {
+      const os = await import('os');
+      const cpus = os.cpus();
+      const isLaptop = cpus.length > 0 && (cpus[0].model || '').toLowerCase().includes('intel') || (cpus[0].model || '').toLowerCase().includes('amd');
+      return {
+        isCharging: true,
+        batteryLevel: 100,
+        isWifiConnected: true,
+        currentSsid: undefined,
+        isRoaming: false,
+        isMetered: false,
+        isVpnConnected: false,
+      };
+    } catch {
+      return {
+        isCharging: true,
+        batteryLevel: 100,
+        isWifiConnected: true,
+        currentSsid: undefined,
+        isRoaming: false,
+        isMetered: false,
+        isVpnConnected: false,
+      };
+    }
+  }
 
   private ensureInterrupt(pairId: string): boolean {
     const now = Date.now();
@@ -169,6 +221,9 @@ export class SyncEngine {
         } catch (err: unknown) {
           errors.push(err);
           this.logger.error(`[SyncEngine/BackendPool] Error en tarea concurrente:`, err instanceof Error ? err.message : err);
+          if (err instanceof Error && (err.message.includes('UNAUTHORIZED_EXPIRED_TOKEN') || err.message.includes(this.WEBHOOK_INTERRUPT))) {
+            index = tasks.length;
+          }
         }
       }
     });
@@ -313,6 +368,16 @@ export class SyncEngine {
   constructor() {
     this.init();
     setInterval(() => this.cleanupSelfWrittenFiles(), 60000);
+    setInterval(() => this.autoRefreshTokensPeriodic(), 15 * 60 * 1000);
+  }
+
+  private async autoRefreshTokensPeriodic() {
+    if (!this.refreshToken) return;
+    const now = Date.now();
+    if (now - this.lastTokenRefreshedAt >= 40 * 60 * 1000) {
+      this.logger.info('[SyncEngine/Auth] Ejecutando renovación proactiva periódica del token OAuth2 (40m)...');
+      await this.refreshAccessToken().catch(() => {});
+    }
   }
 
   private async init() {
@@ -413,6 +478,7 @@ export class SyncEngine {
       this.refreshWatchers();
       this.refreshIntervals();
       this.startExternalDriveMonitor();
+      this.scheduleInterval = setInterval(() => this.evaluateSchedules(), 60 * 1000);
     } catch (err) {
       this.logger.error('[SyncEngine] Init error:', err);
     }
@@ -651,6 +717,7 @@ export class SyncEngine {
     const prev = this.accessToken;
     this.accessToken = accessToken;
     if (refreshToken) this.refreshToken = refreshToken;
+    if (accessToken) this.lastTokenRefreshedAt = Date.now();
 
     this.saveTokens(accessToken, refreshToken || this.refreshToken);
 
@@ -749,15 +816,7 @@ export class SyncEngine {
 
   // --- Token Persistence ---
   private initializeOAuthCredentials() {
-    const fbConfig = getFirebaseClientConfig();
-    this.googleClientId = process.env.VITE_FIREBASE_OAUTH_CLIENT_ID
-      || process.env.VITE_GOOGLE_CLIENT_ID
-      || process.env.GOOGLE_CLIENT_ID
-      || (fbConfig as any).oAuthClientId
-      || '';
-    this.googleClientSecret = process.env.VITE_GOOGLE_CLIENT_SECRET
-      || process.env.GOOGLE_CLIENT_SECRET
-      || '';
+    // Dynamically evaluated via getters
   }
 
   private async saveTokens(accessToken: string | null, refreshToken: string | null): Promise<void> {
@@ -790,30 +849,62 @@ export class SyncEngine {
   }
 
   private async _refreshAccessTokenInternal(): Promise<boolean> {
-    if (!this.refreshToken) return false;
+    if (!this.refreshToken) {
+      this.logger.warn('[SyncEngine/Auth] Cannot refresh access token: No refresh_token stored.');
+      return false;
+    }
     try {
-      const res = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
+      const buildParams = (includeSecret = true) => {
+        const params = new URLSearchParams({
           client_id: this.googleClientId || '',
-          client_secret: this.googleClientSecret || '',
-          refresh_token: this.refreshToken,
+          refresh_token: this.refreshToken!,
           grant_type: 'refresh_token',
-        }).toString(),
+        });
+        if (includeSecret && this.googleClientSecret) {
+          params.append('client_secret', this.googleClientSecret);
+        }
+        return params;
+      };
+
+      let res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: buildParams(true).toString(),
         signal: AbortSignal.timeout(15000),
       });
+
+      // Fallback: If request with client_secret failed with invalid_client, retry without client_secret
+      if (!res.ok && this.googleClientSecret) {
+        const clone = res.clone();
+        const errData = await clone.json().catch(() => ({}));
+        if (errData.error === 'invalid_client') {
+          this.logger.warn('[SyncEngine/Auth] Token refresh with client_secret failed (invalid_client), retrying without client_secret...');
+          res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: buildParams(false).toString(),
+            signal: AbortSignal.timeout(15000),
+          });
+        }
+      }
+
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        if (errData.error === 'invalid_grant') {
+        this.logger.error(`[SyncEngine/Auth] Token refresh request failed (HTTP ${res.status}):`, errData);
+        if (errData.error === 'invalid_grant' || errData.error === 'invalid_client') {
+          this.logger.error(`[SyncEngine/Auth] Refresh token is invalid/revoked (${errData.error}). Clearing stored tokens.`);
           this.refreshToken = null;
           this.accessToken = null;
           await this.saveTokens(null, null);
         }
         return false;
       }
+
       const data = await res.json();
       if (data.access_token) {
         this.accessToken = data.access_token;
+        this.lastTokenRefreshedAt = Date.now();
+        this.logger.info('[SyncEngine/Auth] Access token refreshed successfully via refresh_token.');
         // Persistir refresh_token rotado por Google (si es diferente)
         if (data.refresh_token) {
           this.refreshToken = data.refresh_token;
@@ -825,7 +916,7 @@ export class SyncEngine {
       }
       return false;
     } catch (error) {
-      this.logger.warn('[SyncEngine/Auth] Access-token refresh failed; queued work remains recoverable:', error instanceof Error ? error.message : String(error));
+      this.logger.warn('[SyncEngine/Auth] Access-token refresh failed:', error instanceof Error ? error.message : String(error));
       return false;
     }
   }
@@ -838,6 +929,10 @@ export class SyncEngine {
       pendingConflicts: this.pendingConflicts,
       detectedExternalDrives: this.detectedExternalDrives
     };
+  }
+
+  public getPairs(): SyncPair[] {
+    return this.pairs;
   }
 
   public dismissExternalDriveAlert(drivePath: string) {
@@ -871,7 +966,17 @@ export class SyncEngine {
   }
 
   public async setPairs(pairs: SyncPair[]) {
-    this.pairs = pairs.map(p => ({ ...p, localPath: p.localPath.startsWith('~/') ? path.join(os.homedir(), p.localPath.slice(2)) : p.localPath }));
+    const loaded = await Promise.all(pairs.map(async p => {
+      const conditions = this.getPairConditions(p.id);
+      const schedules = this.getPairSchedules(p.id);
+      return {
+        ...p,
+        localPath: p.localPath.startsWith('~/') ? path.join(os.homedir(), p.localPath.slice(2)) : p.localPath,
+        conditions: conditions || undefined,
+        schedules: schedules || undefined,
+      };
+    }));
+    this.pairs = loaded;
     await this.saveState();
     this.refreshWatchers();
     this.refreshIntervals();
@@ -924,14 +1029,40 @@ export class SyncEngine {
     this.saveState();
   }
 
-  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename' | 'skip'): Promise<void> {
+  public async resolveConflict(conflictId: string, resolution: 'local' | 'remote' | 'rename' | 'skip' | 'overwrite_oldest' | 'overwrite_newest' | 'use_left' | 'use_right' | 'delete' | 'consider_equal'): Promise<void> {
     const conflict = this.pendingConflicts.find(c => c.id === conflictId);
     if (!conflict) return;
     const pair = this.pairs.find(p => p.id === conflict.pairId);
     if (!pair) return;
 
     const fullLocalPath = path.join(pair.localPath, conflict.localPath);
-    let effective: 'local' | 'remote' | 'rename' | 'skip' = resolution;
+    let effective: 'local' | 'remote' | 'rename' | 'skip' | 'overwrite_oldest' | 'overwrite_newest' | 'use_left' | 'use_right' | 'delete' | 'consider_equal' = resolution;
+
+    if (effective === 'consider_equal') {
+      if (conflict.localHash && conflict.remoteHash && conflict.localHash === conflict.remoteHash) {
+        effective = 'skip';
+      } else {
+        effective = conflict.localMtime >= conflict.remoteMtime ? 'local' : 'remote';
+      }
+    }
+
+    if (effective === 'use_left') effective = 'local';
+    if (effective === 'use_right') effective = 'remote';
+    if (effective === 'overwrite_oldest') {
+      effective = conflict.localMtime <= conflict.remoteMtime ? 'local' : 'remote';
+    }
+    if (effective === 'overwrite_newest') {
+      effective = conflict.localMtime >= conflict.remoteMtime ? 'local' : 'remote';
+    }
+
+    if (effective === 'delete') {
+      try {
+        await fs.unlink(fullLocalPath);
+        this.markSelfWritten(fullLocalPath);
+      } catch {}
+      effective = 'skip';
+    }
+
     if (effective === 'local') {
       try {
         await fs.access(fullLocalPath);
@@ -986,7 +1117,7 @@ export class SyncEngine {
     if (effective === 'local') {
       const operationId = this.beginTransferOperation(pair.id, conflict.localPath, 'upload', conflict.remoteFileId);
       try {
-        const uploaded = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, conflict.remoteFileName, conflict.remoteFileId, undefined, operationId);
+        const uploaded = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, conflict.remoteFileName, conflict.remoteFileId, undefined, operationId, undefined, pair.id);
         this.markSelfWritten(fullLocalPath);
         if (operationId && this.db) this.db.updateOperation(operationId, { status: 'done', updated_at: Date.now() });
         const stats = await fs.stat(fullLocalPath);
@@ -1528,7 +1659,7 @@ export class SyncEngine {
               if (stub && stub.id && stub.id.trim()) {
                 const realFileName = entry.name.replace(/\.vstream$/, '');
                 const targetRealPath = path.join(dir, realFileName);
-                await this.downloadDriveBinary(stub.id, targetRealPath, stub.modifiedTime || new Date().toISOString());
+                 await this.downloadDriveBinary(stub.id, targetRealPath, stub.modifiedTime || new Date().toISOString(), pairId);
                 this.markSelfWritten(fullPath);
                 try {
                   await fs.unlink(fullPath);
@@ -1822,6 +1953,32 @@ export class SyncEngine {
 
     let driveChangeBatch: { pageToken: string; controlledRescan: boolean } | null = null;
     try {
+      const systemStatus = await this.readSystemStatus();
+      const conditionResult = ConditionEvaluator.evaluate(pair.conditions, systemStatus, false);
+      if (!conditionResult.canSync) {
+        this.logger.warn(`[SyncEngine/Conditions] pair=${pairId} omitido: ${conditionResult.reason}`);
+        pair.status = conditionResult.statusCode || 'error';
+        pair.progress = {
+          currentFile: `Sincronización omitida: ${conditionResult.reason}`,
+          totalFiles: 0,
+          currentFileIndex: 0,
+          bytesTransferred: 0,
+          totalBytes: 0,
+          percentage: 0,
+          action: 'espera'
+        };
+        this.addEvent({
+          id: Math.random().toString(36).slice(2, 11),
+          pairId: pair.id,
+          filename: pair.localPath,
+          action: 'info',
+          timestamp: Date.now(),
+          details: conditionResult.reason || 'Condiciones no cumplidas',
+        });
+        await this.saveState();
+        return;
+      }
+
       const remoteFolderId = await this.getPairRootRemoteFolderId(pair);
 
       await fs.mkdir(pair.localPath, { recursive: true });
@@ -1878,7 +2035,7 @@ export class SyncEngine {
       else if (err instanceof Error && err.message === 'UNAUTHORIZED_TOKEN_REFRESH_FAILED') {
         pair.status = this.accessToken === null ? 'unauthenticated' : 'error';
       }
-      else pair.status = 'error';
+      else pair.status = this.mapErrorToGranularStatus(err);
       pair.progress = null;
       const errMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
       if (err instanceof Error && err.message !== 'WEBHOOK_INTERRUPT') {
@@ -2486,7 +2643,7 @@ export class SyncEngine {
                 const remoteFolderId = await this.ensureRemoteFolderPath(pair, parentDir === '.' ? '' : parentDir);
                 const existingRemoteId = (state && state.remote_id && state.remote_id !== '.' && state.is_tombstone !== 1) ? state.remote_id : undefined;
 
-                const uploadedFile = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, path.basename(canonicalRelPath), existingRemoteId, state?.vector_clock);
+                const uploadedFile = await this.uploadDriveBinary(remoteFolderId, fullLocalPath, path.basename(canonicalRelPath), existingRemoteId, state?.vector_clock, undefined, undefined, pair.id);
                 const updatedStat = await fs.stat(fullLocalPath);
                 
                 const currentClock = VectorClockManager.fromString(state?.vector_clock || '{}');
@@ -2541,10 +2698,45 @@ export class SyncEngine {
     return operationId;
   }
 
-  private async v2SyncDirectoryTree(localDir: string, remoteFolderId: string, pair: SyncPair, relativePrefix = ''): Promise<boolean> {
+  private async v2SyncDirectoryTree(
+    localDir: string,
+    remoteFolderId: string,
+    pair: SyncPair,
+    relativePrefix = '',
+    dbFolderMap?: Map<string, Map<string, FileState>>,
+    scanTracker?: { scannedFolders: number; totalFoldersEstimate: number }
+  ): Promise<boolean> {
     if (!this.db || !this.DEVICE_ID) return false;
 
-    const dbState = this.db.getFolderState(pair.id);
+    let folderMap = dbFolderMap;
+    let tracker = scanTracker;
+    if (!folderMap) {
+      folderMap = new Map<string, Map<string, FileState>>();
+      const dbState = this.db.getFolderState(pair.id);
+      for (const [relPath, state] of dbState) {
+        const canonicalRelPath = normalizeNFC(relPath);
+        const dirname = path.dirname(canonicalRelPath) === '.' ? '' : normalizeNFC(path.dirname(canonicalRelPath).replace(/\\/g, '/'));
+        const baseName = normalizeNFC(path.basename(canonicalRelPath));
+        let subMap = folderMap.get(dirname);
+        if (!subMap) {
+          subMap = new Map<string, FileState>();
+          folderMap.set(dirname, subMap);
+        }
+        subMap.set(baseName, state);
+      }
+    }
+
+    if (!tracker) {
+      tracker = { scannedFolders: 0, totalFoldersEstimate: Math.max(1, folderMap.size) };
+    }
+
+    tracker.scannedFolders++;
+    const scanPct = Math.min(99, Math.max(1, Math.round((tracker.scannedFolders / tracker.totalFoldersEstimate) * 100)));
+    if (pair.progress) {
+      pair.progress.currentFile = relativePrefix ? `Escaneando subcarpeta: ${relativePrefix}` : 'Escaneando árbol de directorios...';
+      pair.progress.percentage = scanPct;
+      pair.progress.action = 'comprobando';
+    }
 
     const checkInterrupt = () => {
       if (this.interruptRequested[pair.id]) {
@@ -2552,16 +2744,10 @@ export class SyncEngine {
       }
     };
 
-    const dirDbState = new Map<string, FileState>();
-    const normalizedPrefix = relativePrefix.replace(/\\/g, '/');
-    for (const [relPath, state] of dbState) {
-      const dirname = path.dirname(relPath) === '.' ? '' : path.dirname(relPath).replace(/\\/g, '/');
-      if (dirname === normalizedPrefix) {
-        dirDbState.set(path.basename(relPath), state);
-      }
-    }
+    const normalizedPrefix = normalizeNFC(relativePrefix.replace(/\\/g, '/'));
+    const dirDbState = folderMap.get(normalizedPrefix) || new Map<string, FileState>();
 
-    const scanResult = await scanChanges(localDir, dirDbState, new NodeFileSystem(), pair.id);
+    const scanResult = await scanChanges(localDir, dirDbState, new NodeFileSystem(), pair.id, this.exifExtractor as any);
     if (scanResult === 'PERMISSION_DENIED') {
       pair.status = 'error' as any;
       return false;
@@ -2654,6 +2840,20 @@ export class SyncEngine {
       if (plan.moves) plan.moves = [];
     }
 
+    const sortCriterion = pair.transferSortCriterion || pair.transferPriority || 'default';
+    if (sortCriterion !== 'default') {
+      plan.uploads = SyncFilterEngine.sortTransferQueue(plan.uploads.map(u => ({
+        ...u,
+        size: localSnapshot.get(u.localPath)?.size,
+        mtimeMs: localSnapshot.get(u.localPath)?.mtime,
+      })), sortCriterion);
+      plan.downloads = SyncFilterEngine.sortTransferQueue(plan.downloads.map(d => ({
+        ...d,
+        size: d.remoteFile.size ? parseInt(d.remoteFile.size, 10) : 0,
+        mtimeMs: new Date(d.remoteFile.modifiedTime).getTime(),
+      })), sortCriterion);
+    }
+
     // Safeguard: Deletion Protection Guard (Agrupar borrados por raíz para no bloquear carpetas individuales)
     const deletionsCount = plan.deleteLocal.length + plan.deleteRemote.length;
     const totalKnownFiles = dbStateForPlan.size;
@@ -2666,8 +2866,8 @@ export class SyncEngine {
     }
 
     const isMassDeletion = totalKnownFiles > 10 && (
-      deletionsCount > 100 ||
-      (topLevelDeletedRoots.size > 5 && deletionsCount / totalKnownFiles > 0.4)
+      deletionsCount > 50 ||
+      (deletionsCount / totalKnownFiles > 0.30)
     );
 
     if (isMassDeletion) {
@@ -2919,7 +3119,8 @@ export class SyncEngine {
                   pair.progress.percentage = 0;
                 }
               }
-            }
+            },
+            pair.id
           );
 
           this.completedBytesByPair[pair.id] = (this.completedBytesByPair[pair.id] || 0) + stats.size;
@@ -3245,9 +3446,7 @@ export class SyncEngine {
       const folderState = this.db.getFileState(pair.id, subPrefix);
 
       // Comprobar si la carpeta o alguno de sus subarchivos pertenecían a la BD local
-      const hasChildrenInDb = Array.from(dbState.keys()).some(
-        childPath => (childPath === subPrefix || childPath.startsWith(subPrefix + '/')) && dbState.get(childPath)?.is_tombstone !== 1
-      );
+      const hasChildrenInDb = Boolean(folderMap.get(subPrefix) && folderMap.get(subPrefix)!.size > 0);
       const isLocalFolderDeletion = !existsLocally && (hasChildrenInDb || (folderState && folderState.is_tombstone !== 1));
 
       // CASO A: Borrado local de carpeta que existe en Google Drive
@@ -3335,7 +3534,7 @@ export class SyncEngine {
           is_tombstone: 0,
         });
 
-        const childCompleted = await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix);
+        const childCompleted = await this.v2SyncDirectoryTree(subDir, subRemoteFolder.id, pair, subPrefix, folderMap, tracker);
         if (!childCompleted) hadFailures = true;
       } else if (existsLocally) {
         if (folderState && folderState.remote_id && folderState.is_tombstone !== 1) {
@@ -3364,7 +3563,7 @@ export class SyncEngine {
           } else {
             // FIX: Continuar sincronización dentro del subdirectorio usando su remote_id existente
             this.logger.info(`[SyncEngine] Sincronizando subdirectorio existente ${subPrefix}...`);
-            const childCompleted = await this.v2SyncDirectoryTree(subDir, folderState.remote_id, pair, subPrefix);
+            const childCompleted = await this.v2SyncDirectoryTree(subDir, folderState.remote_id, pair, subPrefix, folderMap);
             if (!childCompleted) hadFailures = true;
           }
         } else {
@@ -3390,7 +3589,7 @@ export class SyncEngine {
               updated_at: now,
               is_tombstone: 0,
             });
-            const childCompleted = await this.v2SyncDirectoryTree(subDir, createdFolder.id, pair, subPrefix);
+            const childCompleted = await this.v2SyncDirectoryTree(subDir, createdFolder.id, pair, subPrefix, folderMap);
             if (!childCompleted) hadFailures = true;
           } catch (err: any) {
             if (err instanceof Error && err.message === this.WEBHOOK_INTERRUPT) {
@@ -3417,7 +3616,7 @@ export class SyncEngine {
                   updated_at: now,
                   is_tombstone: 0,
                 });
-                const childCompleted = await this.v2SyncDirectoryTree(subDir, createdFolder.id, pair, subPrefix);
+                const childCompleted = await this.v2SyncDirectoryTree(subDir, createdFolder.id, pair, subPrefix, folderMap);
                 if (!childCompleted) hadFailures = true;
               } catch (retryErr) {
                 this.logger.error(`[SyncEngine] Reintento de creación de carpeta remota falló para ${subPrefix}:`, retryErr);
@@ -3452,8 +3651,7 @@ export class SyncEngine {
   private async handleDriveResponse(res: Response): Promise<Response> {
     if (!res.ok) {
       if (res.status === 401) {
-        const refreshed = await this.refreshAccessToken();
-        if (refreshed) throw new Error('TOKEN_REFRESHED_RETRY');
+        await this.refreshAccessToken().catch(() => false);
         this.accessToken = null;
         throw new Error('UNAUTHORIZED_EXPIRED_TOKEN');
       }
@@ -3575,9 +3773,12 @@ export class SyncEngine {
     }
 
     this.logger.info(`Iniciando descarga binaria para fileId: ${fileId} en: ${destPath}`);
+    const effectiveDest = (pairId && this.getPairById(pairId) && this.isPairEncrypted(this.getPairById(pairId)!))
+      ? destPath + '.syncclient-enc-tmp'
+      : destPath;
     await downloadToAtomicFile({
       sourceUrl: `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true&acknowledgeAbuse=true`,
-      destinationPath: destPath,
+      destinationPath: effectiveDest,
       modifiedTime,
       expectedMd5,
       expectedSize,
@@ -3585,13 +3786,44 @@ export class SyncEngine {
       markSelfWritten: filePath => this.markSelfWritten(filePath),
       onProgress,
     });
+
+    if (pairId && effectiveDest !== destPath) {
+      const pair = this.getPairById(pairId);
+      if (pair && this.isPairEncrypted(pair)) {
+        const password = await this.getPairEncryptionPassword(pairId);
+        if (password) {
+          try {
+            await decryptFile(effectiveDest, destPath, password);
+            await fs.rm(effectiveDest, { force: true });
+            if (modifiedTime) {
+              const mtime = new Date(modifiedTime);
+              await fs.utimes(destPath, mtime, mtime);
+            }
+          } catch (err) {
+            this.logger.error(`[Encryption] Fallo al desencriptar ${destPath}:`, err instanceof Error ? err.message : String(err));
+            throw err;
+          }
+        }
+      }
+    }
   }
 
-  private async uploadDriveBinary(parentId: string, filePath: string, targetName?: string, existingFileId?: string, vectorClock?: string, operationId?: string | null, onProgress?: (loaded: number, total: number) => void): Promise<DriveFile> {
+  private async uploadDriveBinary(parentId: string, filePath: string, targetName?: string, existingFileId?: string, vectorClock?: string, operationId?: string | null, onProgress?: (loaded: number, total: number) => void, pairId?: string): Promise<DriveFile> {
     this.driveFolderCache.delete(parentId);
     const name = targetName || path.basename(filePath);
-    const stats = await fs.stat(filePath);
-    const fileSize = stats.size;
+    let effectivePath = filePath;
+    let effectiveSize = (await fs.stat(filePath)).size;
+
+    if (pairId) {
+      const pair = this.getPairById(pairId);
+      if (pair && this.isPairEncrypted(pair)) {
+        const password = await this.ensureEncryptionKey(pairId);
+        const tempPath = filePath + '.syncclient-enc-tmp';
+        await encryptFile(filePath, tempPath, password);
+        effectivePath = tempPath;
+        effectiveSize = encryptedSize(effectiveSize);
+      }
+    }
 
     let mimeType = 'application/octet-stream';
     const ext = path.extname(name).toLowerCase();
@@ -3611,43 +3843,49 @@ export class SyncEngine {
       ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&fields=id,name,mimeType,modifiedTime,size,md5Checksum,webViewLink&supportsAllDrives=true`
       : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,modifiedTime,size,md5Checksum,webViewLink&supportsAllDrives=true';
 
-    if (fileSize > RESUMABLE_UPLOAD_THRESHOLD) {
+    if (effectiveSize > RESUMABLE_UPLOAD_THRESHOLD) {
       const client = this.transferClient();
-      const resumableOperationId = operationId ?? `upload:${filePath}:${fileSize}`;
+      const resumableOperationId = operationId ?? `upload:${filePath}:${effectiveSize}`;
       const session = this.db && operationId ? this.db.getUploadSession(operationId) : null;
-      const uploaded = await uploadResumableFile({
-        filePath,
-        fileSize,
-        operationId: resumableOperationId,
-        remoteId: existingFileId ?? null,
-        session,
-        client,
-        onProgress,
-        createSession: async () => {
-          const response = await requestTransfer(
-            client,
-            initUrl,
-            () => ({
-              method: existingFileId ? 'PATCH' : 'POST',
-              headers: {
-                'Content-Type': 'application/json; charset=UTF-8',
-                'X-Upload-Content-Type': mimeType,
-                'X-Upload-Content-Length': String(fileSize),
-              },
-              body: JSON.stringify(metadata),
-            }),
-          );
-          if (!response.ok) throw new Error(`Drive resumable session initialization failed (${response.status})`);
-          return response;
-        },
-        persistSession: nextSession => {
-          if (this.db && operationId) this.db.setUploadSession(nextSession);
-        },
-        deleteSession: () => {
-          if (this.db && operationId) this.db.deleteUploadSession(operationId);
-        },
-      });
-      return uploaded as unknown as DriveFile;
+      try {
+        const uploaded = await uploadResumableFile({
+          filePath: effectivePath,
+          fileSize: effectiveSize,
+          operationId: resumableOperationId,
+          remoteId: existingFileId ?? null,
+          session,
+          client,
+          onProgress,
+          createSession: async () => {
+            const response = await requestTransfer(
+              client,
+              initUrl,
+              () => ({
+                method: existingFileId ? 'PATCH' : 'POST',
+                headers: {
+                  'Content-Type': 'application/json; charset=UTF-8',
+                  'X-Upload-Content-Type': mimeType,
+                  'X-Upload-Content-Length': String(effectiveSize),
+                },
+                body: JSON.stringify(metadata),
+              }),
+            );
+            if (!response.ok) throw new Error(`Drive resumable session initialization failed (${response.status})`);
+            return response;
+          },
+          persistSession: nextSession => {
+            if (this.db && operationId) this.db.setUploadSession(nextSession);
+          },
+          deleteSession: () => {
+            if (this.db && operationId) this.db.deleteUploadSession(operationId);
+          },
+        });
+        return uploaded as unknown as DriveFile;
+      } finally {
+        if (effectivePath !== filePath) {
+          await fs.rm(effectivePath, { force: true });
+        }
+      }
     }
 
     const boundary = '-------SyncClientBoundary' + Math.random().toString(36);
@@ -3661,7 +3899,7 @@ export class SyncEngine {
     const res = await this.driveRequestFactory(
       url,
       () => {
-        const fileStream = fsSync.createReadStream(filePath);
+        const fileStream = fsSync.createReadStream(effectivePath);
         const bodyPayload = Readable.from((async function* () {
           yield header;
           for await (const chunk of fileStream) {
@@ -3674,7 +3912,7 @@ export class SyncEngine {
           headers: {
             Authorization: `Bearer ${this.accessToken}`,
             'Content-Type': `multipart/related; boundary=${boundary}`,
-            'Content-Length': String(header.length + fileSize + footer.length),
+            'Content-Length': String(header.length + effectiveSize + footer.length),
           },
           body: bodyPayload as any,
           duplex: 'half'
@@ -3685,10 +3923,16 @@ export class SyncEngine {
 
     if (res.status === 404 && existingFileId) {
       this.logger.warn(`[SyncEngine/Upload] Remote fileId ${existingFileId} no encontrado en Drive (404). Reintentando creación como archivo nuevo.`);
-      return this.uploadDriveBinary(parentId, filePath, targetName, undefined, vectorClock, operationId, onProgress);
+      if (effectivePath !== filePath) {
+        await fs.rm(effectivePath, { force: true });
+      }
+      return this.uploadDriveBinary(parentId, filePath, targetName, undefined, vectorClock, operationId, onProgress, pairId);
     }
     await this.handleDriveResponse(res);
-    onProgress?.(fileSize, fileSize);
+    onProgress?.(effectiveSize, effectiveSize);
+    if (effectivePath !== filePath) {
+      await fs.rm(effectivePath, { force: true });
+    }
     return (await res.json()) as DriveFile;
   }
   public async shutdown(): Promise<void> {
@@ -3704,6 +3948,12 @@ export class SyncEngine {
       clearInterval(this.externalMonitorInterval);
       this.externalMonitorInterval = null;
       this.logger.info('[SyncEngine] Monitor de unidades externas detenido.');
+    }
+
+    if (this.scheduleInterval) {
+      clearInterval(this.scheduleInterval);
+      this.scheduleInterval = null;
+      this.logger.info('[SyncEngine] Scheduler de intervalos detenido.');
     }
 
     for (const pairId in this.webhookDebounceTimers) {
@@ -3783,6 +4033,299 @@ export class SyncEngine {
         this.logger.warn(`[Webhooks] Falló el registro del canal para Google Drive:`, errorMessage);
       }
     }
+  }
+
+  // --- Métodos de Ayuda para Capacidades Estilo FolderSync ---
+
+  public getPairFilters(pairId: string): any[] {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) return [];
+    try {
+      return rawDb.prepare('SELECT * FROM sync_pair_filters_v2 WHERE pair_id = ? ORDER BY id ASC').all(pairId);
+    } catch {
+      return [];
+    }
+  }
+
+  public addPairFilter(pairId: string, filter: any): any {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    const stmt = rawDb.prepare(`
+      INSERT INTO sync_pair_filters_v2 (pair_id, rule_type, string_value, numeric_value, numeric_value2, is_include, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const res = stmt.run(
+      pairId,
+      filter.rule_type,
+      filter.string_value ?? null,
+      typeof filter.numeric_value === 'number' ? filter.numeric_value : null,
+      typeof filter.numeric_value2 === 'number' ? filter.numeric_value2 : null,
+      filter.is_include ?? 0,
+      filter.created_at || Date.now()
+    );
+    return { ...filter, id: res.lastInsertRowid };
+  }
+
+  public deletePairFilter(filterId: number): void {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    rawDb.prepare('DELETE FROM sync_pair_filters_v2 WHERE id = ?').run(filterId);
+  }
+
+  public getItemLogs(pairId: string, limit = 50, offset = 0): any[] {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) return [];
+    try {
+      return rawDb.prepare(`
+        SELECT * FROM sync_item_logs WHERE pair_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?
+      `).all(pairId, limit, offset);
+    } catch {
+      return [];
+    }
+  }
+
+  public getPairConditions(pairId: string): any | null {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) return null;
+    try {
+      return rawDb.prepare('SELECT * FROM sync_pair_conditions_v2 WHERE pair_id = ?').get(pairId) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  public setPairConditions(conditions: any): any {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    const stmt = rawDb.prepare(`
+      INSERT INTO sync_pair_conditions_v2 (pair_id, require_charging, require_wifi, min_battery_level, block_on_roaming, block_on_metered, require_vpn, allowed_ssids)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(pair_id) DO UPDATE SET
+        require_charging = excluded.require_charging,
+        require_wifi = excluded.require_wifi,
+        min_battery_level = excluded.min_battery_level,
+        block_on_roaming = excluded.block_on_roaming,
+        block_on_metered = excluded.block_on_metered,
+        require_vpn = excluded.require_vpn,
+        allowed_ssids = excluded.allowed_ssids
+    `);
+    stmt.run(
+      conditions.pair_id,
+      conditions.require_charging ?? 0,
+      conditions.require_wifi ?? 0,
+      conditions.min_battery_level ?? 0,
+      conditions.block_on_roaming ?? 0,
+      conditions.block_on_metered ?? 0,
+      conditions.require_vpn ?? 0,
+      conditions.allowed_ssids ?? null
+    );
+    return conditions;
+  }
+
+  public getWebhooks(pairId?: string): any[] {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) return [];
+    try {
+      if (pairId) {
+        return rawDb.prepare('SELECT * FROM sync_webhooks_v2 WHERE pair_id = ?').all(pairId);
+      }
+      return rawDb.prepare('SELECT * FROM sync_webhooks_v2').all();
+    } catch {
+      return [];
+    }
+  }
+
+  public addWebhook(webhook: any): any {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    const stmt = rawDb.prepare(`
+      INSERT INTO sync_webhooks_v2 (pair_id, target_url, event_trigger, is_active, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const res = stmt.run(
+      webhook.pair_id,
+      webhook.target_url,
+      webhook.event_trigger || 'all',
+      webhook.is_active ?? 1,
+      webhook.created_at || Date.now()
+    );
+    return { ...webhook, id: res.lastInsertRowid };
+  }
+
+  public deleteWebhook(id: number): void {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    rawDb.prepare('DELETE FROM sync_webhooks_v2 WHERE id = ?').run(id);
+  }
+
+  public getPairSchedules(pairId: string): any[] {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) return [];
+    try {
+      return rawDb.prepare('SELECT * FROM sync_pair_schedules WHERE pair_id = ? ORDER BY id ASC').all(pairId);
+    } catch {
+      return [];
+    }
+  }
+
+  public addPairSchedule(pairId: string, schedule: any): any {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    const stmt = rawDb.prepare(`
+      INSERT INTO sync_pair_schedules (pair_id, name, interval_minutes, enabled, require_charging, require_wifi, min_battery_level, block_on_roaming, block_on_metered, require_vpn, allowed_ssids, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const res = stmt.run(
+      pairId,
+      schedule.name || 'Schedule',
+      schedule.interval_minutes ?? 60,
+      schedule.enabled ?? 1,
+      schedule.require_charging ?? 0,
+      schedule.require_wifi ?? 0,
+      schedule.min_battery_level ?? 0,
+      schedule.block_on_roaming ?? 0,
+      schedule.block_on_metered ?? 0,
+      schedule.require_vpn ?? 0,
+      schedule.allowed_ssids || null,
+      schedule.created_at || Date.now()
+    );
+    return { ...schedule, id: res.lastInsertRowid, pair_id: pairId };
+  }
+
+  public updatePairSchedule(schedule: any): any {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    const stmt = rawDb.prepare(`
+      UPDATE sync_pair_schedules SET
+        name = ?, interval_minutes = ?, enabled = ?, require_charging = ?, require_wifi = ?, min_battery_level = ?,
+        block_on_roaming = ?, block_on_metered = ?, require_vpn = ?, allowed_ssids = ?
+      WHERE id = ? AND pair_id = ?
+    `);
+    stmt.run(
+      schedule.name,
+      schedule.interval_minutes,
+      schedule.enabled ? 1 : 0,
+      schedule.require_charging ? 1 : 0,
+      schedule.require_wifi ? 1 : 0,
+      schedule.min_battery_level ?? 0,
+      schedule.block_on_roaming ? 1 : 0,
+      schedule.block_on_metered ? 1 : 0,
+      schedule.require_vpn ? 1 : 0,
+      schedule.allowed_ssids || null,
+      schedule.id,
+      schedule.pair_id
+    );
+    return schedule;
+  }
+
+  public deletePairSchedule(scheduleId: number): void {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) throw new Error('Base de datos no inicializada');
+    rawDb.prepare('DELETE FROM sync_pair_schedules WHERE id = ?').run(scheduleId);
+  }
+
+  public async evaluateSchedules() {
+    const rawDb = (this.db as any)?.db;
+    if (!rawDb) return;
+    try {
+      const schedules = rawDb.prepare('SELECT * FROM sync_pair_schedules WHERE enabled = 1').all();
+      for (const schedule of schedules) {
+        const pair = this.pairs.find(p => p.id === schedule.pair_id);
+        if (!pair || pair.status === 'syncing' || pair.status === 'paused') continue;
+
+        const now = Date.now();
+        const lastSynced = pair.lastSynced || 0;
+        const intervalMs = (schedule.interval_minutes || 60) * 60 * 1000;
+        if (now - lastSynced < intervalMs) continue;
+
+        const systemStatus = await this.readSystemStatus();
+        const conditionResult = ConditionEvaluator.evaluate(schedule, systemStatus, false);
+        if (!conditionResult.canSync) {
+          this.logger.info(`[Schedule] pair=${pair.id} omitido por schedule: ${conditionResult.reason}`);
+          continue;
+        }
+
+        this.logger.info(`[Schedule] Disparando sync para pair=${pair.id} por schedule`);
+        this.triggerSync(pair.id);
+      }
+    } catch (err) {
+      this.logger.error('[Schedule] Error evaluando schedules:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  public async getPairEncryptionPassword(pairId: string): Promise<string | null> {
+    const stored = await SecureStore.get(`encryption:password:${pairId}`);
+    return stored;
+  }
+
+  public async setPairEncryptionPassword(pairId: string, password: string): Promise<void> {
+    await SecureStore.set(`encryption:password:${pairId}`, password);
+  }
+
+  public async removePairEncryptionPassword(pairId: string): Promise<void> {
+    await SecureStore.remove(`encryption:password:${pairId}`);
+  }
+
+  public async ensureEncryptionKey(pairId: string): Promise<string> {
+    let password = await this.getPairEncryptionPassword(pairId);
+    if (!password) {
+      password = crypto.randomBytes(32).toString('hex');
+      await this.setPairEncryptionPassword(pairId, password);
+      const rawDb = (this.db as any)?.db;
+      if (rawDb) {
+        const salt = deriveKey(password, crypto.randomBytes(16)).toString('hex');
+        try {
+          rawDb.prepare('INSERT OR REPLACE INTO sync_pair_encryption_keys (pair_id, salt, created_at) VALUES (?, ?, ?)').run(pairId, salt, Date.now());
+        } catch { /* table may not exist yet */ }
+      }
+    }
+    return password;
+  }
+
+  public isPairEncrypted(pair: { encryptionMode?: string }): boolean {
+    return pair.encryptionMode === 'encrypted';
+  }
+
+  private getPairById(pairId: string) {
+    return this.pairs.find(p => p.id === pairId);
+  }
+
+  private mapErrorToGranularStatus(err: unknown): SyncStatus {
+    const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+    if (msg.includes('enomem') || msg.includes('no space') || msg.includes('not enough space') || msg.includes('disk quota exceeded')) {
+      return 'sync_failed_not_enough_space';
+    }
+    if (msg.includes('eacces') || msg.includes('eperm') || msg.includes('permission denied') || msg.includes('write permission')) {
+      return 'sync_failed_missing_write_permission';
+    }
+    if (msg.includes('timeout') || msg.includes('etimedout') || msg.includes('esockettimeout')) {
+      return 'sync_failed_timeout';
+    }
+    if (msg.includes('roaming') || msg.includes('block_on_roaming')) {
+      return 'sync_failed_is_roaming';
+    }
+    if (msg.includes('metered') || msg.includes('block_on_metered')) {
+      return 'sync_failed_metered_connection';
+    }
+    if (msg.includes('vpn') && msg.includes('required')) {
+      return 'sync_failed_vpn_not_connected';
+    }
+    if (msg.includes('ssid') && msg.includes('not allowed')) {
+      return 'sync_failed_ssid_not_allowed';
+    }
+    if (msg.includes('not charging') || msg.includes('charging required')) {
+      return 'sync_failed_not_charging';
+    }
+    if (msg.includes('network') && msg.includes('illegal')) {
+      return 'sync_failed_illegal_network_state';
+    }
+    if (msg.includes('no account') || msg.includes('not configured')) {
+      return 'sync_failed_no_account_configured';
+    }
+    if (msg.includes('no file path') || msg.includes('path not configured')) {
+      return 'sync_failed_no_file_path_configured';
+    }
+    return 'error';
   }
 }
 

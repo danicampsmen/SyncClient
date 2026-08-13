@@ -1,10 +1,23 @@
+export type { SyncPairConditions, SyncWebhook, SyncPairFilter } from './shared/schema';
 export type SyncDirection = 'bidirectional' | 'upload' | 'download';
-export type SyncStatus = 'idle' | 'syncing' | 'error' | 'paused' | 'unauthenticated';
-export type ConflictResolution = 'prompt' | 'local' | 'remote' | 'rename';
+import type { SyncPairConditions } from './shared/schema';
+export type SyncStatus = 'idle' | 'syncing' | 'error' | 'paused' | 'unauthenticated'
+  | 'sync_failed_illegal_network_state' | 'sync_failed_not_enough_space' | 'sync_failed_missing_write_permission'
+  | 'sync_failed_missing_manage_files_permission' | 'sync_failed_no_account_configured' | 'sync_failed_analysis_error'
+  | 'sync_failed_no_file_path_configured' | 'sync_failed_is_roaming' | 'sync_failed_ssid_not_allowed'
+  | 'sync_failed_not_charging' | 'sync_failed_vpn_not_connected' | 'sync_ok_do_not_record'
+  | 'sync_failed_metered_connection' | 'sync_failed_timeout' | 'sync_failed_generic';
+export type ConflictResolution = 'prompt' | 'local' | 'remote' | 'rename' | 'overwrite_oldest' | 'overwrite_newest' | 'use_left' | 'use_right' | 'delete' | 'consider_equal';
 export type SyncMode = 'mirror' | 'streaming'; // mirror = Clonación Total 1:1 Offline; streaming = Unidad Virtual On-Demand
 export type CloudCategory = 'computers' | 'shared'; // computers = 'Ordenadores' de Google Drive; shared = 'Mi Unidad' Colaborativa multi-dispositivo
 export type EngineType = 'native' | 'rclone'; // <-- NUEVO: Selector de Motor Nativo V2 o Rclone
 export type RcloneOp = 'bisync' | 'sync' | 'copy' | 'check'; // <-- NUEVO: Operación Rclone CLI
+export type TransferPriority = 'default' | 'size_smallest' | 'size_largest' | 'modified_oldest' | 'modified_newest';
+export type TransferSortCriterion = 'default' | 'size_smallest' | 'size_largest' | 'modified_oldest' | 'modified_newest';
+export type EncryptionMode = 'none' | 'encrypted';
+export type TransferFileAction = 'copy_rename_if_exists' | 'move_rename_if_exists';
+export type AppSyncStartSource = 'unknown' | 'scheduled' | 'instant' | 'automation' | 'user' | 'deeplink' | 'tasker' | 'shortcut' | 'cli';
+export type NetworkCondition = 'roaming' | 'metered' | 'ssid_mismatch' | 'vpn_required' | 'not_charging';
 
 export interface SyncSettings {
   maxDownloadSpeed: number; // KB/s, 0 for unlimited
@@ -13,6 +26,19 @@ export interface SyncSettings {
   ignoredPatterns: string[];
   autoStart?: boolean;
   desktopNotifications?: boolean;
+  encryptionMode?: EncryptionMode;
+  transferPriority?: TransferPriority;
+  transferSortCriterion?: TransferSortCriterion;
+  transferFileAction?: TransferFileAction;
+  requireWifi?: boolean;
+  requireCharging?: boolean;
+  blockOnRoaming?: boolean;
+  blockOnMetered?: boolean;
+  requireVpn?: boolean;
+  allowedSsids?: string[];
+  minBatteryLevel?: number;
+  webhookUrl?: string;
+  webhookEventTrigger?: 'all' | 'success' | 'error';
 }
 
 export interface ExternalDriveAlert {
@@ -68,6 +94,14 @@ export interface SyncPair {
   stubsCount?: number;
   hydratedSize?: number;
   progress?: SyncProgress | null;
+  encryptionMode?: EncryptionMode;
+  transferPriority?: TransferPriority;
+  transferSortCriterion?: TransferSortCriterion;
+  transferFileAction?: TransferFileAction;
+  backupMode?: boolean;
+  lastBackupTimestamp?: number;
+  accountProperties?: Record<string, string>;
+  conditions?: SyncPairConditions;
 }
 
 export interface SyncEvent {

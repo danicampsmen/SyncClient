@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="sync_now"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_sync"
+        android:shortcutShortLabel="@string/shortcut_sync_short"
+        android:shortcutLongLabel="@string/shortcut_sync_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.syncclient.app"
+            android:targetClass="com.syncclient.app.MainActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="pause_sync"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_pause"
+        android:shortcutShortLabel="@string/shortcut_pause_short"
+        android:shortcutLongLabel="@string/shortcut_pause_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.syncclient.app"
+            android:targetClass="com.syncclient.app.MainActivity" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+</shortcuts>
