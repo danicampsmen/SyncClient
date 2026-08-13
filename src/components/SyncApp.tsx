@@ -1637,26 +1637,26 @@ function FoldersTab({ pairs, onAddPair, onUpdatePair, forceSync, pauseSync, remo
                   >
                     {pair.status === 'paused' ? <Play size={14} className="text-green-400" /> : <Pause size={14} />}
                   </button>
-                  <button
-                    onClick={() => setEditingPair(pair)}
-                    className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
-                    title="Editar configuración del par"
-                  >
-                    <Settings size={14} />
-                  </button>
-                  <button
-                    onClick={() => openRecycleBin(pair.id)}
-                    className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
-                    title="Recycle Bin"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                  <button
-                    onClick={() => removePair(pair.id)}
-                    className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800/70 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 border border-neutral-800 text-xs transition-colors"
-                    title="Desvincular carpeta"
-                  >
-                    <Trash2 size={14} />
+                   <button
+                     onClick={() => setEditingPair(pair)}
+                     className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
+                     title="Editar configuración del par"
+                   >
+                     <Settings size={14} />
+                   </button>
+                   {/* <button
+                     onClick={() => openRecycleBin(pair.id)}
+                     className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
+                     title="Recycle Bin"
+                   >
+                     <Trash2 size={14} />
+                   </button> */}
+                   <button
+                     onClick={() => removePair(pair.id)}
+                     className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800/70 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 border border-neutral-800 text-xs transition-colors"
+                     title="Desvincular carpeta"
+                   >
+                     <Trash2 size={14} />
                   </button>
                 </div>
               </div>

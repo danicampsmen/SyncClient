@@ -143,6 +143,13 @@ export function EditPairModal({ pair, onSave, onClose }: EditPairModalProps) {
       };
 
       await syncService.setPairConditions(pair.id, updated.conditions);
+      await syncService.updatePair(pair.id, {
+        encryptionMode: updated.encryptionMode,
+        transferSortCriterion: updated.transferSortCriterion,
+        transferPriority: updated.transferPriority,
+        transferFileAction: updated.transferFileAction,
+        backupMode: updated.backupMode,
+      });
       await onSave(updated);
       onClose();
     } catch (e) {

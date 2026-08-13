@@ -1590,6 +1590,15 @@ export class SyncEngine {
     await this.saveState();
   }
 
+  public async updatePair(pairId: string, data: Partial<SyncPair>) {
+    const pair = this.pairs.find(p => p.id === pairId);
+    if (!pair) return;
+    Object.assign(pair, data);
+    await this.saveState();
+    this.refreshWatchers();
+    this.refreshIntervals();
+  }
+
   public async setPairMode(pairId: string, syncMode: 'mirror' | 'streaming', cloudCategory?: 'computers' | 'shared') {
     const pair = this.pairs.find(p => p.id === pairId);
     if (!pair) return;

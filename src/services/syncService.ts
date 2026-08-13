@@ -382,6 +382,20 @@ class SyncService {
     return data.conditions;
   }
 
+  public async updatePair(pairId: string, data: Partial<SyncPair>) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.updatePair?.(pairId, data);
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to update pair');
+    return await res.json();
+  }
+
   public async getWebhooks(pairId?: string) {
     if (this.isNative) {
       await this.ensureNativeEngine();

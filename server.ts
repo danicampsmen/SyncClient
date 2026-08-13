@@ -1050,6 +1050,23 @@ async function startServer() {
     }
   });
 
+  app.put("/api/pairs/:pairId", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const allowedUpdates = ['encryptionMode', 'transferSortCriterion', 'transferPriority', 'transferFileAction', 'backupMode', 'syncMode', 'cloudCategory', 'status'];
+      const updates: any = {};
+      for (const key of allowedUpdates) {
+        if (req.body[key] !== undefined) {
+          updates[key] = req.body[key];
+        }
+      }
+      syncEngine.updatePair(pairId, updates);
+      res.json({ success: true, pair: syncEngine.getPairs().find(p => p.id === pairId) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 4. Webhooks HTTP
   app.get("/api/webhooks", (req, res) => {
     try {
