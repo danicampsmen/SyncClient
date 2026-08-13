@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   FolderSync, Cloud, HardDrive, Activity, Settings,
@@ -7,7 +7,8 @@ import {
   LogOut, LogIn, Folder, ShieldAlert, X, Search, Link, Copy,
   Check, Usb, BatteryWarning, WifiOff, Bell, Power, Filter, Tag, Layers, Users
 } from 'lucide-react';
-import { SyncPair, SyncEvent, SyncDirection, SyncSettings, PendingConflict, ExternalDriveAlert, SyncMode, CloudCategory, SyncProgress, SyncStatus, EngineType, RcloneOp } from '../types';
+import { SyncPair, SyncEvent, SyncDirection, SyncSettings, PendingConflict, ExternalDriveAlert, SyncMode, CloudCategory, SyncProgress, SyncStatus, EngineType, RcloneOp, EncryptionMode, TransferSortCriterion, TransferPriority, TransferFileAction } from '../types';
+import { EditPairModal } from './EditPairModal';
 import { VFSBridge } from '../utils/vfsBridge';
 import { initAuth, googleSignIn, logout } from '../auth';
 import { listFolders, createFolder, DriveFile } from '../drive';
@@ -18,6 +19,7 @@ type Tab = 'overview' | 'folders' | 'activity' | 'settings';
 
 import { syncService } from '../services/syncService';
 import { Logger } from '../shared/browserLogger';
+import { initFrontendTelemetry } from '../shared/telemetry';
 
 const logger = new Logger('SyncApp');
 
@@ -42,6 +44,10 @@ export default function SyncApp() {
   const [powerSavingMode, setPowerSavingMode] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<string>('default');
   const [isCleaningCloudJunk, setIsCleaningCloudJunk] = useState(false);
+  const [recycleBinPairId, setRecycleBinPairId] = useState<string | null>(null);
+  const [recycleBinEntries, setRecycleBinEntries] = useState<any[]>([]);
+  const [recycleBinTotalSize, setRecycleBinTotalSize] = useState<string>('0 B');
+  const [loadingRecycleBin, setLoadingRecycleBin] = useState(false);
 
   const pendingConflictsRef = useRef(pendingConflicts);
   pendingConflictsRef.current = pendingConflicts;
@@ -191,6 +197,8 @@ export default function SyncApp() {
   };
 
   useEffect(() => {
+    initFrontendTelemetry();
+
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -391,11 +399,60 @@ export default function SyncApp() {
       await syncService.setPairs(updated);
       fetchBackendStatus();
     } catch (e: any) {
-      // Rollback optimistic update and show user the error
       setPairs(prev);
       const msg = e instanceof Error ? e.message : String(e);
       alert(`No se pudo crear el par: ${msg}`);
       throw e;
+    }
+  };
+
+  async function handleUpdatePair(updatedPair: SyncPair) {
+    const prev = pairs;
+    const updated = pairs.map(p => p.id === updatedPair.id ? updatedPair : p);
+    setPairs(updated);
+    try {
+      await syncService.setPairs(updated);
+      fetchBackendStatus();
+    } catch (e: any) {
+      setPairs(prev);
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`No se pudo actualizar el par: ${msg}`);
+      throw e;
+    }
+  }
+
+  const openRecycleBin = async (pairId: string) => {
+    setRecycleBinPairId(pairId);
+    setLoadingRecycleBin(true);
+    try {
+      const data = await syncService.getRecycleBin(pairId);
+      setRecycleBinEntries(data.entries || []);
+      setRecycleBinTotalSize(data.formattedSize || '0 B');
+    } catch (e) {
+      alert('Error al cargar recycle bin');
+    } finally {
+      setLoadingRecycleBin(false);
+    }
+  };
+
+  const emptyRecycleBin = async (pairId: string) => {
+    if (!window.confirm('¿Vaciar recycle bin? Esta acción no se puede deshacer.')) return;
+    try {
+      await syncService.emptyRecycleBin(pairId);
+      setRecycleBinEntries([]);
+      setRecycleBinTotalSize('0 B');
+    } catch (e) {
+      alert('Error al vaciar recycle bin');
+    }
+  };
+
+  const rotateRecycleBin = async (pairId: string) => {
+    try {
+      const data = await syncService.rotateRecycleBin(pairId);
+      setRecycleBinEntries(data.entries || []);
+      setRecycleBinTotalSize(data.formattedSize || '0 B');
+    } catch (e) {
+      alert('Error al rotar recycle bin');
     }
   };
 
@@ -422,7 +479,7 @@ export default function SyncApp() {
     }
   };
 
-  const resolveConflict = async (conflictId: string, resolution: 'local' | 'remote' | 'rename') => {
+  const resolveConflict = async (conflictId: string, resolution: 'local' | 'remote' | 'rename' | 'overwrite_oldest' | 'overwrite_newest' | 'use_left' | 'use_right' | 'delete' | 'consider_equal') => {
     // FASE 4: Optimistic UI - Desaparecer el aviso al instante
     setPendingConflicts(current => current.filter(c => c.id !== conflictId));
     try {
@@ -718,7 +775,7 @@ export default function SyncApp() {
                 <OverviewTab pairs={pairs} events={events} conflictsCount={pendingConflicts.length} uploadSpeed={uploadSpeed} downloadSpeed={downloadSpeed} isOnline={isOnline} pingMs={pingMs} etaSeconds={etaSeconds} />
               </div>
               <div style={{ display: activeTab === 'folders' ? 'block' : 'none' }}>
-                <FoldersTab pairs={pairs} onAddPair={addPair} forceSync={forceSync} pauseSync={pauseSync} removePair={removePair} uploadSpeed={uploadSpeed} downloadSpeed={downloadSpeed} isOnline={isOnline} pingMs={pingMs} etaSeconds={etaSeconds} onCleanCloudTrash={handleCleanCloudTrash} isCleaningCloudJunk={isCleaningCloudJunk} onCancelCleanCloudTrash={handleCancelCleanCloudTrash} />
+                <FoldersTab pairs={pairs} onAddPair={addPair} onUpdatePair={handleUpdatePair} forceSync={forceSync} pauseSync={pauseSync} removePair={removePair} uploadSpeed={uploadSpeed} downloadSpeed={downloadSpeed} isOnline={isOnline} pingMs={pingMs} etaSeconds={etaSeconds} onCleanCloudTrash={handleCleanCloudTrash} isCleaningCloudJunk={isCleaningCloudJunk} onCancelCleanCloudTrash={handleCancelCleanCloudTrash} />
               </div>
               <div style={{ display: activeTab === 'activity' ? 'block' : 'none' }}>
                 <ActivityTab events={events} pairs={pairs} />
@@ -902,7 +959,7 @@ function OverviewTab({ pairs, events, conflictsCount, uploadSpeed = 0, downloadS
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-6">
         <StatCard title="Syncs Activas" value={activeCount.toString()} icon={<RefreshCw size={20} className={activeCount > 0 ? 'animate-spin text-blue-400' : 'text-neutral-500'} />} />
         <StatCard title="Carpetas" value={pairs.length.toString()} icon={<FolderSync size={20} className="text-neutral-500" />} />
-        <StatCard title="Eventos" value={events.length.toString()} icon={<Activity size={20} className="text-neutral-500" />} />
+        <StatCard title="Eventos" value={events.length >= 200 ? '200+' : events.length.toString()} icon={<Activity size={20} className="text-neutral-500" />} />
         <StatCard title="Conflictos" value={conflictsCount.toString()} icon={<AlertCircle size={20} className={conflictsCount > 0 ? 'text-amber-400' : 'text-neutral-500'} />} />
       </div>
 
@@ -1011,6 +1068,11 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
   // Acotar los bytes transferidos para que NUNCA superen los bytes totales
   const safeTransferred = totalBytes > 0 ? Math.min(rawTransferred, totalBytes) : rawTransferred;
 
+  // Cálculo de Porcentaje Coherente Global
+  const avgPercentage = syncingPairs.length > 0
+    ? Math.round(syncingPairs.reduce((sum, p) => sum + (p.progress?.percentage || 0), 0) / syncingPairs.length)
+    : 0;
+
   // Cálculo de Porcentaje Coherente
   const pct = isActivelySyncing
     ? (totalBytes > 0
@@ -1019,7 +1081,7 @@ function TotalSyncProgressBar({ pairs, uploadSpeed = 0, downloadSpeed = 0, isOnl
             : Math.max(1, Math.round((safeTransferred / totalBytes) * 100)))
         : (totalAllFiles > 0
             ? Math.min(99, Math.max(1, Math.round((totalFiles / totalAllFiles) * 100)))
-            : 5
+            : (avgPercentage > 0 ? avgPercentage : 5)
           )
       )
     : 100;
@@ -1260,9 +1322,10 @@ function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null,
   );
 }
 
-function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, uploadSpeed = 0, downloadSpeed = 0, isOnline = true, pingMs = null, etaSeconds = null, onCleanCloudTrash, isCleaningCloudJunk, onCancelCleanCloudTrash }: {
+function FoldersTab({ pairs, onAddPair, onUpdatePair, forceSync, pauseSync, removePair, uploadSpeed = 0, downloadSpeed = 0, isOnline = true, pingMs = null, etaSeconds = null, onCleanCloudTrash, isCleaningCloudJunk, onCancelCleanCloudTrash }: {
   pairs: SyncPair[];
   onAddPair: (p: SyncPair) => void;
+  onUpdatePair: (p: SyncPair) => void;
   forceSync: (id: string) => void;
   pauseSync: (id: string) => void;
   removePair: (id: string) => void;
@@ -1276,6 +1339,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
   onCancelCleanCloudTrash?: () => void;
 }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [editingPair, setEditingPair] = useState<SyncPair | null>(null);
   const [activeDedupPairs, setActiveDedupPairs] = useState<Set<string>>(new Set());
 
   const handleDehydrate = async (pairId: string) => {
@@ -1381,6 +1445,16 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
             }} onCancel={() => setShowAdd(false)} />
           </motion.div>
         )}
+
+        <AnimatePresence>
+          {editingPair && (
+            <EditPairModal
+              pair={editingPair}
+              onSave={onUpdatePair}
+              onClose={() => setEditingPair(null)}
+            />
+          )}
+        </AnimatePresence>
       </AnimatePresence>
 
       <div className="space-y-4">
@@ -1496,6 +1570,42 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
                       <span className="text-green-400 flex items-center font-semibold">
                         <CheckCircle2 size={13} className="mr-1.5 text-green-400" /> Al día
                       </span>
+                    ) : pair.status === 'sync_failed_is_roaming' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Roaming activo
+                      </span>
+                    ) : pair.status === 'sync_failed_metered_connection' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Conexión medida
+                      </span>
+                    ) : pair.status === 'sync_failed_vpn_not_connected' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> VPN requerida
+                      </span>
+                    ) : pair.status === 'sync_failed_not_charging' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Sin cargador
+                      </span>
+                    ) : pair.status === 'sync_failed_ssid_not_allowed' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Wi-Fi no permitida
+                      </span>
+                    ) : pair.status === 'sync_failed_illegal_network_state' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Sin Wi-Fi
+                      </span>
+                    ) : pair.status === 'sync_failed_not_enough_space' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Sin espacio
+                      </span>
+                    ) : pair.status === 'sync_failed_missing_write_permission' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Sin permisos
+                      </span>
+                    ) : pair.status === 'sync_failed_timeout' ? (
+                      <span className="text-red-400 flex items-center">
+                        <AlertCircle size={12} className="mr-1.5" /> Timeout
+                      </span>
                     ) : (
                       <span className="text-red-400 flex items-center">
                         <AlertCircle size={12} className="mr-1.5" /> Error
@@ -1509,7 +1619,7 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
                   </span>
                 </div>
 
-                {/* Botones Primarios (Sincronizar, Pausa, Eliminar) */}
+                {/* Botones Primarios (Sincronizar, Pausa, Editar, Eliminar) */}
                 <div className="flex items-center space-x-1.5 shrink-0">
                   <button
                     onClick={() => forceSync(pair.id)}
@@ -1526,6 +1636,20 @@ function FoldersTab({ pairs, onAddPair, forceSync, pauseSync, removePair, upload
                     title={pair.status === 'paused' ? 'Reanudar' : 'Pausar'}
                   >
                     {pair.status === 'paused' ? <Play size={14} className="text-green-400" /> : <Pause size={14} />}
+                  </button>
+                  <button
+                    onClick={() => setEditingPair(pair)}
+                    className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
+                    title="Editar configuración del par"
+                  >
+                    <Settings size={14} />
+                  </button>
+                  <button
+                    onClick={() => openRecycleBin(pair.id)}
+                    className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
+                    title="Recycle Bin"
+                  >
+                    <Trash2 size={14} />
                   </button>
                   <button
                     onClick={() => removePair(pair.id)}
@@ -2537,6 +2661,10 @@ function AddPairForm({ onAdd, onCancel }: { onAdd: (p: SyncPair) => void, onCanc
   );
 }
 
+// function EditPairModal({ pair, onSave, onClose }: { pair: SyncPair, onSave: (p: SyncPair) => void, onClose: () => void }) {
+//   return null;
+// }
+
 function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[] }) {
   const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -2878,7 +3006,34 @@ function ActivityTab({ events, pairs }: { events: SyncEvent[], pairs: SyncPair[]
 function SettingsTab({ settings, onUpdateSettings }: { settings: SyncSettings, onUpdateSettings: (s: SyncSettings) => void }) {
   const [newPattern, setNewPattern] = useState('');
   const [resettingDb, setResettingDb] = useState(false);
+  const [webhooks, setWebhooks] = useState<any[]>([]);
+  const [newWebhookUrl, setNewWebhookUrl] = useState('');
+  const [newWebhookTrigger, setNewWebhookTrigger] = useState('all');
   const patterns = settings.ignoredPatterns || ['*.aux', '*.log', '*.fls', '*.fdb_latexmk', '*.out', '*.toc', '*.synctex.gz', '*.bcf*', '*.bbl*', '*SAVE-ERROR*', '*.swp', '*.lock', '*~', 'node_modules', '.git', '.DS_Store', '*.tmp'];
+
+  useEffect(() => {
+    syncService.getWebhooks().then(data => setWebhooks(data.webhooks || [])).catch(() => {});
+  }, []);
+
+  const addWebhook = async () => {
+    if (!newWebhookUrl.trim()) return;
+    try {
+      const hook = await syncService.addWebhook('global', newWebhookUrl.trim(), newWebhookTrigger);
+      setWebhooks([...webhooks, hook]);
+      setNewWebhookUrl('');
+    } catch (e) {
+      alert('Error al agregar webhook');
+    }
+  };
+
+  const deleteWebhook = async (id: number) => {
+    try {
+      await syncService.deleteWebhook(id);
+      setWebhooks(webhooks.filter(w => w.id !== id));
+    } catch (e) {
+      alert('Error al eliminar webhook');
+    }
+  };
 
   const addPattern = () => {
     if (newPattern && !patterns.includes(newPattern.trim())) {
@@ -2896,6 +3051,13 @@ function SettingsTab({ settings, onUpdateSettings }: { settings: SyncSettings, o
     if ((window as any).electronBridge?.setAutoStart) {
       await (window as any).electronBridge.setAutoStart(checked);
     }
+    try {
+      await fetch('/api/settings/autostart', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: checked }),
+      });
+    } catch { /* best effort */ }
   };
 
   return (
@@ -3004,6 +3166,81 @@ function SettingsTab({ settings, onUpdateSettings }: { settings: SyncSettings, o
           </div>
         </div>
 
+        <div className="bg-white/[0.02] backdrop-blur-md border border-white/[0.05] rounded-2xl p-6 shadow-xl hover:bg-white/[0.03] transition-colors">
+          <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Encriptación y Orden de Transferencia</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-neutral-400 mb-2">Modo de Encriptación</label>
+              <select
+                value={settings.encryptionMode || 'none'}
+                onChange={(e) => onUpdateSettings({ ...settings, encryptionMode: e.target.value as EncryptionMode })}
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white"
+              >
+                <option value="none">Sin encriptación</option>
+                <option value="encrypted">AES-256-GCM (Cliente-Side)</option>
+              </select>
+              <p className="text-[10px] text-neutral-500 mt-1">Encripta archivos antes de subir a Drive.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-400 mb-2">Criterio de Orden de Transferencia</label>
+              <select
+                value={settings.transferSortCriterion || 'default'}
+                onChange={(e) => onUpdateSettings({ ...settings, transferSortCriterion: e.target.value as TransferSortCriterion })}
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-white"
+              >
+                <option value="default">Por defecto</option>
+                <option value="size_smallest">Más pequeños primero</option>
+                <option value="size_largest">Más grandes primero</option>
+                <option value="modified_oldest">Modificados hace más tiempo</option>
+                <option value="modified_newest">Modificados recientemente</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white/[0.02] backdrop-blur-md border border-white/[0.05] rounded-2xl p-6 shadow-xl hover:bg-white/[0.03] transition-colors">
+          <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Webhooks</h3>
+          <p className="text-xs text-neutral-400 mb-4">Recibe notificaciones HTTP cuando finalice una sincronización.</p>
+          <div className="space-y-2 mb-4">
+            {webhooks.map(w => (
+              <div key={w.id} className="flex items-center justify-between bg-neutral-950/60 border border-neutral-800 rounded-lg px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs text-white font-mono truncate block">{w.target_url}</span>
+                  <span className="text-[10px] text-neutral-500">Trigger: {w.event_trigger}</span>
+                </div>
+                <button onClick={() => deleteWebhook(w.id)} className="text-neutral-400 hover:text-red-400 ml-2">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            {webhooks.length === 0 && <p className="text-xs text-neutral-500">No hay webhooks configurados.</p>}
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <input
+              type="text"
+              value={newWebhookUrl}
+              onChange={e => setNewWebhookUrl(e.target.value)}
+              placeholder="https://tu-servidor.com/webhook"
+              className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
+            />
+            <select
+              value={newWebhookTrigger}
+              onChange={e => setNewWebhookTrigger(e.target.value)}
+              className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white"
+            >
+              <option value="all">Todos</option>
+              <option value="success">Éxito</option>
+              <option value="error">Error</option>
+            </select>
+            <button
+              onClick={addWebhook}
+              className="px-3.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white font-medium text-xs rounded-lg transition-colors border border-neutral-700"
+            >
+              + Agregar
+            </button>
+          </div>
+        </div>
+
         <div className="bg-red-950/20 backdrop-blur-md border border-red-900/50 rounded-2xl p-6 shadow-xl shadow-red-900/10">
           <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Resolución de Conflictos</h3>
           <p className="text-xs text-neutral-400 mb-4">Cuando un archivo se modifica en ambas ubicaciones simultáneamente:</p>
@@ -3023,6 +3260,30 @@ function SettingsTab({ settings, onUpdateSettings }: { settings: SyncSettings, o
             <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
               <input type="radio" name="conflict" checked={settings.conflictResolution === 'rename'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'rename' })} className="bg-neutral-950 border-neutral-800" />
               <span>Renombrar y mantener ambos archivos</span>
+            </label>
+            <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
+              <input type="radio" name="conflict" checked={settings.conflictResolution === 'overwrite_oldest'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'overwrite_oldest' })} className="bg-neutral-950 border-neutral-800" />
+              <span>Sobrescribir con la versión más antigua</span>
+            </label>
+            <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
+              <input type="radio" name="conflict" checked={settings.conflictResolution === 'overwrite_newest'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'overwrite_newest' })} className="bg-neutral-950 border-neutral-800" />
+              <span>Sobrescribir con la versión más reciente</span>
+            </label>
+            <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
+              <input type="radio" name="conflict" checked={settings.conflictResolution === 'use_left'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'use_left' })} className="bg-neutral-950 border-neutral-800" />
+              <span>Usar siempre la versión local (left)</span>
+            </label>
+            <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
+              <input type="radio" name="conflict" checked={settings.conflictResolution === 'use_right'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'use_right' })} className="bg-neutral-950 border-neutral-800" />
+              <span>Usar siempre la versión remota (right)</span>
+            </label>
+            <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
+              <input type="radio" name="conflict" checked={settings.conflictResolution === 'delete'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'delete' })} className="bg-neutral-950 border-neutral-800" />
+              <span>Eliminar el archivo conflictivo</span>
+            </label>
+            <label className="flex items-center space-x-3 text-sm text-neutral-300 cursor-pointer">
+              <input type="radio" name="conflict" checked={settings.conflictResolution === 'consider_equal'} onChange={() => onUpdateSettings({ ...settings, conflictResolution: 'consider_equal' })} className="bg-neutral-950 border-neutral-800" />
+              <span>Considerar iguales y no hacer nada</span>
             </label>
           </div>
         </div>
