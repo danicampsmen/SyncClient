@@ -10,6 +10,7 @@ import { USE_V2_SYNC, FileState, DriveCursor } from '../shared/schema';
 import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager } from '../shared/VectorClock';
+import { runInPool } from '../shared/runInPool';
 import { scanChanges } from '../shared/Scanner';
 import { ExifDateExtractor } from '../shared/ExifDateExtractor';
 import { SyncFilterEngine } from '../shared/SyncFilterEngine';
@@ -270,26 +271,7 @@ export class SyncEngine {
   }
 
   private async runInPool<T>(tasks: (() => Promise<T>)[], concurrency = 3): Promise<T[]> {
-    const results: T[] = new Array(tasks.length);
-    const errors: unknown[] = [];
-    let index = 0;
-    const workers = Array.from({ length: Math.min(concurrency, TRANSFER_CONCURRENCY, tasks.length) }, async () => {
-      while (index < tasks.length) {
-        const currentIndex = index++;
-        try {
-          results[currentIndex] = await tasks[currentIndex]();
-        } catch (err: unknown) {
-          errors.push(err);
-          this.logger.error(`[SyncEngine/BackendPool] Task error:`, err instanceof Error ? err.message : err);
-        }
-      }
-    });
-    await Promise.all(workers);
-    if (errors.length > 0) {
-      const firstError = errors[0];
-      throw firstError instanceof Error ? firstError : new Error(String(firstError));
-    }
-    return results;
+    return runInPool(tasks, concurrency);
   }
 
   private maybeVacuumDatabase(): void {

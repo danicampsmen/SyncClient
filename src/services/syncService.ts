@@ -396,6 +396,44 @@ class SyncService {
     return await res.json();
   }
 
+  public async getRecycleBinEntries(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.getRecycleBinEntries?.(pairId) || [];
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/recycle-bin`);
+    if (!res.ok) throw new Error('Failed to fetch recycle bin');
+    const data = await res.json();
+    return data.entries || [];
+  }
+
+  public async restoreFromRecycleBin(pairId: string, relativePath: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.restoreFromRecycleBin?.(pairId, relativePath);
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/recycle-bin/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairId, relativePath })
+    });
+    if (!res.ok) throw new Error('Failed to restore from recycle bin');
+    return await res.json();
+  }
+
+  public async emptyRecycleBin(pairId: string) {
+    if (this.isNative) {
+      await this.ensureNativeEngine();
+      return this.localEngine?.emptyRecycleBin?.(pairId) || 0;
+    }
+    const res = await backendFetch(`/api/pairs/${encodeURIComponent(pairId)}/recycle-bin/empty`, {
+      method: 'POST'
+    });
+    if (!res.ok) throw new Error('Failed to empty recycle bin');
+    const data = await res.json();
+    return data.count || 0;
+  }
+
   public async getWebhooks(pairId?: string) {
     if (this.isNative) {
       await this.ensureNativeEngine();
@@ -482,35 +520,6 @@ class SyncService {
     return await res.json();
   }
 
-  public async getRecycleBin(pairId: string) {
-    if (this.isNative) {
-      await this.ensureNativeEngine();
-      return this.localEngine?.getRecycleBin?.(pairId) || { entries: [], totalSize: 0, formattedSize: '0 B' };
-    }
-    const res = await backendFetch(`/api/recycle-bin/${encodeURIComponent(pairId)}`);
-    if (!res.ok) throw new Error('Failed to fetch recycle bin');
-    return await res.json();
-  }
-
-  public async emptyRecycleBin(pairId: string) {
-    if (this.isNative) {
-      await this.ensureNativeEngine();
-      return this.localEngine?.emptyRecycleBin?.(pairId) || { success: true, deletedCount: 0 };
-    }
-    const res = await backendFetch(`/api/recycle-bin/${encodeURIComponent(pairId)}/empty`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to empty recycle bin');
-    return await res.json();
-  }
-
-  public async rotateRecycleBin(pairId: string) {
-    if (this.isNative) {
-      await this.ensureNativeEngine();
-      return this.localEngine?.rotateRecycleBin?.(pairId) || { success: true, entries: [], totalSize: 0, formattedSize: '0 B' };
-    }
-    const res = await backendFetch(`/api/recycle-bin/${encodeURIComponent(pairId)}/rotate`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to rotate recycle bin');
-    return await res.json();
-  }
 }
 
 export const syncService = new SyncService();

@@ -6,6 +6,7 @@
 import { FileState } from './schema';
 import { IFileSystem } from '../utils/fileSystem';
 import { Logger } from '../backend/logger';
+import { runInPool } from './runInPool';
 
 const logger = new Logger('Scanner');
 
@@ -240,7 +241,7 @@ export async function lazyHashBatch(
 
     for (let i = 0; i < entryArray.length; i += batchSize) {
         const batch = entryArray.slice(i, i + batchSize);
-        const batchResults = await runWithConcurrency(
+        const batchResults = await runInPool(
             batch.map(entry => async () => {
                 const hashes = await computeBlockHashes(entry.fullPath);
                 return { name: entry.name, hashes };
@@ -256,34 +257,6 @@ export async function lazyHashBatch(
     }
 
     return results;
-}
-
-async function runWithConcurrency<T>(
-    tasks: (() => Promise<T>)[],
-    concurrency: number
-): Promise<T[]> {
-    const results: T[] = new Array(tasks.length);
-    const errors: unknown[] = [];
-    let index = 0;
-
-    const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
-        while (index < tasks.length) {
-            const i = index++;
-            try {
-                results[i] = await tasks[i]();
-            } catch (e: any) {
-                errors.push(e);
-                logger.error(`[Scanner/LazyHash] Error in worker:`, e?.message || e);
-            }
-        }
-    });
-
-    await Promise.all(workers);
-    if (errors.length > 0) {
-        const firstError = errors[0];
-        throw firstError instanceof Error ? firstError : new Error(String(firstError));
-    }
-    return results.filter((value): value is T => value !== undefined);
 }
 
 function isImageFile(name: string): boolean {

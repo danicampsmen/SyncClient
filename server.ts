@@ -1067,6 +1067,39 @@ async function startServer() {
     }
   });
 
+  app.get("/api/pairs/:pairId/recycle-bin", (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const entries = syncEngine.getRecycleBinEntries(pairId);
+      res.json({ entries });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pairs/:pairId/recycle-bin/restore", async (req, res) => {
+    try {
+      const { pairId, relativePath } = req.body;
+      if (!isValidString(pairId, 256) || !isValidString(relativePath, 4096)) {
+        return res.status(400).json({ error: "pairId y relativePath son requeridos" });
+      }
+      await syncEngine.restoreFromRecycleBin(pairId, relativePath);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pairs/:pairId/recycle-bin/empty", async (req, res) => {
+    try {
+      const { pairId } = req.params;
+      const count = await syncEngine.emptyRecycleBin(pairId);
+      res.json({ success: true, count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 4. Webhooks HTTP
   app.get("/api/webhooks", (req, res) => {
     try {
@@ -1176,46 +1209,6 @@ async function startServer() {
       if (isNaN(id)) return res.status(400).json({ error: "ID inválido" });
       syncEngine.deletePairSchedule(id);
       res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // 5. Recycle Bin
-  app.get("/api/recycle-bin/:pairId", async (req, res) => {
-    try {
-      const { pairId } = req.params;
-      const pair = syncEngine.getPairs().find(p => p.id === pairId);
-      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
-      const entries = await recycleBin.scanPair(pair.localPath, pairId);
-      const totalSize = await recycleBin.getTotalSize(entries);
-      res.json({ entries, totalSize, formattedSize: recycleBin.formatBytes(totalSize) });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/recycle-bin/:pairId/empty", async (req, res) => {
-    try {
-      const { pairId } = req.params;
-      const pair = syncEngine.getPairs().find(p => p.id === pairId);
-      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
-      const count = await recycleBin.empty(pair.localPath);
-      res.json({ success: true, deletedCount: count });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/recycle-bin/:pairId/rotate", async (req, res) => {
-    try {
-      const { pairId } = req.params;
-      const pair = syncEngine.getPairs().find(p => p.id === pairId);
-      if (!pair) return res.status(404).json({ error: "Par no encontrado" });
-      const entries = await recycleBin.scanPair(pair.localPath, pairId);
-      const rotated = await recycleBin.rotate(entries);
-      const totalSize = await recycleBin.getTotalSize(rotated);
-      res.json({ success: true, entries: rotated, totalSize, formattedSize: recycleBin.formatBytes(totalSize) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

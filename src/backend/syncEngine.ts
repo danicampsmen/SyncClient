@@ -12,6 +12,8 @@ import { USE_V2_SYNC, FileState, DriveCursor } from '../shared/schema';
 import { IStorageBackend, createBackend } from '../shared/StorageBackend';
 import { getOrCreateDeviceId } from '../shared/DeviceIdentity';
 import { VectorClockManager } from '../shared/VectorClock';
+import { SyncProgressObserver } from '../shared/SyncProgressObserver';
+import { runInPool } from '../shared/runInPool';
 import { scanChanges, computeBlockHashes, lazyHashBatch, type LocalEntry } from '../shared/Scanner';
 import { ExifDateExtractor } from '../shared/ExifDateExtractor';
 import { SyncFilterEngine } from '../shared/SyncFilterEngine';
@@ -27,6 +29,7 @@ import { Logger } from './logger';
 import { encryptFile, decryptFile, encryptedSize, EncryptionError, deriveKey } from './encryption';
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getDatabase, ref, onValue } from 'firebase/database';
+import { RecycleBinManager, BackupEntry } from './recycleBin';
 import { getFirebaseClientConfig } from '../config/firebaseConfig';
 import {
   INITIAL_POLL_INTERVAL_MS,
@@ -103,6 +106,7 @@ export class SyncEngine {
   private refreshToken: string | null = null;
   private lastTokenRefreshedAt: number = 0;
   private lastProgressEmitAt: Record<string, number> = {};
+  private readonly progressObserver = new SyncProgressObserver({ maxBufferSize: 200, throttleMs: 150 });
   private get googleClientId(): string {
     const fbConfig = getFirebaseClientConfig();
     return process.env.VITE_FIREBASE_OAUTH_CLIENT_ID
@@ -141,6 +145,7 @@ export class SyncEngine {
   private detectedExternalDrives: ExternalDriveAlert[] = [];
   private externalMonitorInterval: NodeJS.Timeout | null = null;
   private driveFolderCache = new Map<string, { timestamp: number; files: DriveFile[] }>();
+  private recycleBinManager = new RecycleBinManager(new Logger('RecycleBin'));
 
   // --- v2: Database-backed state ---
   private db: IStorageBackend | null = null;
@@ -935,6 +940,18 @@ export class SyncEngine {
     return this.pairs;
   }
 
+  public subscribeProgress(handler: (pairId: string, progress: any) => void): () => void {
+    return this.progressObserver.subscribe((update) => handler(update.pairId, update.progress));
+  }
+
+  public getProgressSubscriberCount(): number {
+    return this.progressObserver.getSubscriberCount();
+  }
+
+  private emitProgress(pair: SyncPair): void {
+    this.progressObserver.notify(pair);
+  }
+
   public dismissExternalDriveAlert(drivePath: string) {
     this.detectedExternalDrives = this.detectedExternalDrives.filter(d => d.path !== drivePath);
   }
@@ -1608,6 +1625,29 @@ export class SyncEngine {
     if (syncMode === 'mirror') await this.hydratePair(pairId);
   }
 
+  public async getRecycleBinEntries(pairId: string): Promise<BackupEntry[]> {
+    const pair = this.pairs.find(p => p.id === pairId);
+    if (!pair) return [];
+    const entries = await this.recycleBinManager.scanPair(pair.localPath, pairId);
+    return this.recycleBinManager.rotate(entries);
+  }
+
+  public async restoreFromRecycleBin(pairId: string, relativePath: string): Promise<void> {
+    const pair = this.pairs.find(p => p.id === pairId);
+    if (!pair) return;
+    const entries = await this.recycleBinManager.scanPair(pair.localPath, pairId);
+    const entry = entries.find(e => e.relativePath === relativePath);
+    if (!entry) return;
+    const targetPath = path.join(pair.localPath, relativePath);
+    await this.recycleBinManager.restore(entry, targetPath);
+  }
+
+  public async emptyRecycleBin(pairId: string): Promise<number> {
+    const pair = this.pairs.find(p => p.id === pairId);
+    if (!pair) return 0;
+    return this.recycleBinManager.empty(pair.localPath);
+  }
+
   public async dehydratePair(pairId: string) {
     const pair = this.pairs.find(p => p.id === pairId);
     if (!pair || !pair.localPath) return;
@@ -1898,6 +1938,7 @@ export class SyncEngine {
         percentage: 50,
         action: 'subiendo'
       };
+      this.emitProgress(pair);
 
       try {
         const result = await runner.run(rclonePairConfig, pairLock);
@@ -1910,6 +1951,7 @@ export class SyncEngine {
           bytesTransferred: 0, totalBytes: 0,
           percentage: 100, action: 'completado'
         };
+        this.emitProgress(pair);
 
         this.addEvent({
           id: Math.random().toString(36).slice(2, 11),
@@ -1928,6 +1970,7 @@ export class SyncEngine {
         this.logger.error(`[Rclone] Error ejecutando rclone para par=${pairId}:`, detailMsg);
         pair.status = 'error';
         pair.progress = null;
+        this.emitProgress(pair);
 
         // FIX: Limpiar cola de reintentos pendientes para evitar bucles de 2 segundos
         this.pendingSyncs.delete(pairId);
@@ -1976,6 +2019,7 @@ export class SyncEngine {
           percentage: 0,
           action: 'espera'
         };
+        this.emitProgress(pair);
         this.addEvent({
           id: Math.random().toString(36).slice(2, 11),
           pairId: pair.id,
@@ -2032,6 +2076,7 @@ export class SyncEngine {
         bytesTransferred: finalBytesTransferred, totalBytes: finalTotalBytes > 0 ? finalTotalBytes : finalBytesTransferred,
         percentage: 100, action: 'completado'
       };
+      this.emitProgress(pair);
 
       this.maybeVacuumDatabase();
 
@@ -2046,6 +2091,7 @@ export class SyncEngine {
       }
       else pair.status = this.mapErrorToGranularStatus(err);
       pair.progress = null;
+      this.emitProgress(pair);
       const errMsg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err);
       if (err instanceof Error && err.message !== 'WEBHOOK_INTERRUPT') {
         this.logger.error(`[SyncEngine] pair=${pairId} sync failed; recoverable state was retained:`, errMsg);
@@ -2171,6 +2217,7 @@ export class SyncEngine {
     this.activeSyncs.add(pairId);
     pair.status = 'syncing';
     pair.progress = { currentFile: 'Verificando carpetas y duplicados...', totalFiles: 0, currentFileIndex: 0, bytesTransferred: 0, totalBytes: 0, percentage: 0, action: 'comprobando' };
+    this.emitProgress(pair);
 
     this.runSync(pair, pairLock);
   }

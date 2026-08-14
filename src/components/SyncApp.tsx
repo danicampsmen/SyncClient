@@ -49,6 +49,58 @@ export default function SyncApp() {
   const [recycleBinTotalSize, setRecycleBinTotalSize] = useState<string>('0 B');
   const [loadingRecycleBin, setLoadingRecycleBin] = useState(false);
 
+  const formatSize = (bytes: number) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const openRB = useCallback(async (pairId: string) => {
+    setRecycleBinPairId(pairId);
+    setLoadingRecycleBin(true);
+    try {
+      const entries = await syncService.getRecycleBinEntries(pairId);
+      setRecycleBinEntries(entries);
+      setRecycleBinTotalSize(formatSize(entries.reduce((sum, e) => sum + (e.size || 0), 0)));
+    } catch (e) {
+      alert('Error al cargar recycle bin');
+    } finally {
+      setLoadingRecycleBin(false);
+    }
+  }, []);
+
+  const restoreFromRecycleBin = async (pairId: string, relativePath: string) => {
+    try {
+      await syncService.restoreFromRecycleBin(pairId, relativePath);
+      await openRB(pairId);
+    } catch (e) {
+      alert('Error al restaurar archivo');
+    }
+  };
+
+  const emptyRecycleBin = async (pairId: string) => {
+    if (!window.confirm('¿Vaciar recycle bin? Esta acción no se puede deshacer.')) return;
+    try {
+      await syncService.emptyRecycleBin(pairId);
+      setRecycleBinEntries([]);
+      setRecycleBinTotalSize('0 B');
+    } catch (e) {
+      alert('Error al vaciar recycle bin');
+    }
+  };
+
+  const rotateRecycleBin = async (pairId: string) => {
+    try {
+      const entries = await syncService.getRecycleBinEntries(pairId);
+      setRecycleBinEntries(entries);
+      setRecycleBinTotalSize(formatSize(entries.reduce((sum, e) => sum + (e.size || 0), 0)));
+    } catch (e) {
+      alert('Error al rotar recycle bin');
+    }
+  };
+
   const pendingConflictsRef = useRef(pendingConflicts);
   pendingConflictsRef.current = pendingConflicts;
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
@@ -421,41 +473,6 @@ export default function SyncApp() {
     }
   }
 
-  const openRecycleBin = async (pairId: string) => {
-    setRecycleBinPairId(pairId);
-    setLoadingRecycleBin(true);
-    try {
-      const data = await syncService.getRecycleBin(pairId);
-      setRecycleBinEntries(data.entries || []);
-      setRecycleBinTotalSize(data.formattedSize || '0 B');
-    } catch (e) {
-      alert('Error al cargar recycle bin');
-    } finally {
-      setLoadingRecycleBin(false);
-    }
-  };
-
-  const emptyRecycleBin = async (pairId: string) => {
-    if (!window.confirm('¿Vaciar recycle bin? Esta acción no se puede deshacer.')) return;
-    try {
-      await syncService.emptyRecycleBin(pairId);
-      setRecycleBinEntries([]);
-      setRecycleBinTotalSize('0 B');
-    } catch (e) {
-      alert('Error al vaciar recycle bin');
-    }
-  };
-
-  const rotateRecycleBin = async (pairId: string) => {
-    try {
-      const data = await syncService.rotateRecycleBin(pairId);
-      setRecycleBinEntries(data.entries || []);
-      setRecycleBinTotalSize(data.formattedSize || '0 B');
-    } catch (e) {
-      alert('Error al rotar recycle bin');
-    }
-  };
-
   const toggleSync = async (id: string) => {
     setPairs(current => current.map(p => p.id === id ? { ...p, status: p.status === 'syncing' ? 'idle' : 'syncing' } : p));
     syncService.toggleSync(id).finally(() => setTimeout(fetchBackendStatus, 500));
@@ -775,7 +792,7 @@ export default function SyncApp() {
                 <OverviewTab pairs={pairs} events={events} conflictsCount={pendingConflicts.length} uploadSpeed={uploadSpeed} downloadSpeed={downloadSpeed} isOnline={isOnline} pingMs={pingMs} etaSeconds={etaSeconds} />
               </div>
               <div style={{ display: activeTab === 'folders' ? 'block' : 'none' }}>
-                <FoldersTab pairs={pairs} onAddPair={addPair} onUpdatePair={handleUpdatePair} forceSync={forceSync} pauseSync={pauseSync} removePair={removePair} uploadSpeed={uploadSpeed} downloadSpeed={downloadSpeed} isOnline={isOnline} pingMs={pingMs} etaSeconds={etaSeconds} onCleanCloudTrash={handleCleanCloudTrash} isCleaningCloudJunk={isCleaningCloudJunk} onCancelCleanCloudTrash={handleCancelCleanCloudTrash} />
+                <FoldersTab pairs={pairs} onAddPair={addPair} onUpdatePair={handleUpdatePair} forceSync={forceSync} pauseSync={pauseSync} removePair={removePair} uploadSpeed={uploadSpeed} downloadSpeed={downloadSpeed} isOnline={isOnline} pingMs={pingMs} etaSeconds={etaSeconds} onCleanCloudTrash={handleCleanCloudTrash} isCleaningCloudJunk={isCleaningCloudJunk} onCancelCleanCloudTrash={handleCancelCleanCloudTrash} onOpenRecycleBin={openRB} onEmptyRecycleBin={emptyRecycleBin} onRotateRecycleBin={rotateRecycleBin} />
               </div>
               <div style={{ display: activeTab === 'activity' ? 'block' : 'none' }}>
                 <ActivityTab events={events} pairs={pairs} />
@@ -1322,7 +1339,7 @@ function SyncProgressBar({ progress, status }: { progress?: SyncProgress | null,
   );
 }
 
-function FoldersTab({ pairs, onAddPair, onUpdatePair, forceSync, pauseSync, removePair, uploadSpeed = 0, downloadSpeed = 0, isOnline = true, pingMs = null, etaSeconds = null, onCleanCloudTrash, isCleaningCloudJunk, onCancelCleanCloudTrash }: {
+function FoldersTab({ pairs, onAddPair, onUpdatePair, forceSync, pauseSync, removePair, uploadSpeed = 0, downloadSpeed = 0, isOnline = true, pingMs = null, etaSeconds = null, onCleanCloudTrash, isCleaningCloudJunk, onCancelCleanCloudTrash, onOpenRecycleBin, onEmptyRecycleBin, onRotateRecycleBin }: {
   pairs: SyncPair[];
   onAddPair: (p: SyncPair) => void;
   onUpdatePair: (p: SyncPair) => void;
@@ -1337,6 +1354,9 @@ function FoldersTab({ pairs, onAddPair, onUpdatePair, forceSync, pauseSync, remo
   onCleanCloudTrash?: () => void;
   isCleaningCloudJunk?: boolean;
   onCancelCleanCloudTrash?: () => void;
+  onOpenRecycleBin?: (id: string) => void;
+  onEmptyRecycleBin?: (id: string) => void;
+  onRotateRecycleBin?: (id: string) => void;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingPair, setEditingPair] = useState<SyncPair | null>(null);
@@ -1644,13 +1664,13 @@ function FoldersTab({ pairs, onAddPair, onUpdatePair, forceSync, pauseSync, remo
                    >
                      <Settings size={14} />
                    </button>
-                   {/* <button
-                     onClick={() => openRecycleBin(pair.id)}
-                     className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
-                     title="Recycle Bin"
-                   >
+                    <button
+                      onClick={() => onOpenRecycleBin?.(pair.id)}
+                      className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 text-xs transition-colors"
+                      title="Recycle Bin"
+                    >
                      <Trash2 size={14} />
-                   </button> */}
+                   </button>
                    <button
                      onClick={() => removePair(pair.id)}
                      className="p-1.5 flex items-center justify-center rounded-lg bg-neutral-800/70 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 border border-neutral-800 text-xs transition-colors"
